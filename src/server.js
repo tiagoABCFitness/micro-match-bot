@@ -1,4 +1,5 @@
 const express = require('express');
+const fs = require('fs');
 const app = express();
 
 app.use(express.json());
@@ -6,16 +7,26 @@ app.use(express.json());
 app.post('/slack/events', (req, res) => {
   const { type, challenge, event } = req.body;
 
-  // url verification
+  // URL verification
   if (type === 'url_verification') {
     return res.status(200).send(challenge);
   }
 
-
-  // process messages
+  // Process direct messages
   if (event && event.type === 'message' && event.channel_type === 'im') {
-    console.log(`received message from ${event.user}: ${event.text}`);
-    // save/reply messages
+    console.log(`Received message from ${event.user}: ${event.text}`);
+
+    // Save response
+    const responsesPath = './data/responses.json';
+    let responses = {};
+
+    if (fs.existsSync(responsesPath)) {
+      responses = JSON.parse(fs.readFileSync(responsesPath));
+    }
+
+    responses[event.user] = event.text;
+
+    fs.writeFileSync(responsesPath, JSON.stringify(responses, null, 2));
   }
 
   res.status(200).send();
