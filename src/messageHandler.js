@@ -5,11 +5,17 @@ async function sendMessageToUsers(text) {
   const users = JSON.parse(fs.readFileSync('./data/users.json'));
 
   for (const userId of users) {
-    await slackClient.chat.postMessage({
-      channel: userId,
-      text,
-    });
+    try {
+      const res = await slackClient.chat.postMessage({
+        channel: userId,
+        text,
+      });
+      console.log(`Mensage sent to ${userId}:`, res.ok);
+    } catch (error) {
+      console.error(`Fail sending to ${userId}:`, error.message);
+    }
   }
 }
 
 module.exports = { sendMessageToUsers };
+
