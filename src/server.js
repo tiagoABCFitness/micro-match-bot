@@ -23,7 +23,7 @@ app.post('/slack/events', (req, res) => {
   if (event && event.type === 'message' && event.channel_type === 'im') {
     console.log(`Received message from ${event.user}: ${event.text}`);
 
-    // Salva as respostas (pode migrar para banco depois)
+    //saves messages
     const responsesPath = path.join(__dirname, 'data', 'responses.json');
     let responses = {};
 
