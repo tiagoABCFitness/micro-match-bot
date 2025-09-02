@@ -2,7 +2,7 @@ name: Slack Bot Weekly Message
 
 on:
   schedule:
-    - cron: '40 13 * * 2'
+    - cron: '00 13 * * 2'
   workflow_dispatch:
 
 jobs:
