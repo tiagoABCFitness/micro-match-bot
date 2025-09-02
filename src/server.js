@@ -9,6 +9,7 @@ app.post('/slack/events', (req, res) => {
 
   // URL verification
   if (type === 'url_verification') {
+    res.setHeader('Content-Type', 'text/plain');
     return res.status(200).send(challenge);
   }
 
