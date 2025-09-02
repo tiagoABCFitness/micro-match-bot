@@ -10,12 +10,11 @@ async function sendMessageToUsers(text) {
         channel: userId,
         text,
       });
-      console.log(`Mensage sent to ${userId}:`, res.ok);
+      console.log(`Message sent to ${userId}:`, res.ok);
     } catch (error) {
-      console.error(`Fail sending to ${userId}:`, error.message);
+      console.error(`Error sending to ${userId}:`, error.message);
     }
   }
 }
 
 module.exports = { sendMessageToUsers };
-
