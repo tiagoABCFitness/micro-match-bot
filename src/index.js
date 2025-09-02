@@ -19,4 +19,4 @@ async function sendInitialMessages() {
 }
 
 // enviar depois do start ou manualmente
-// sendInitialMessages();
+sendInitialMessages();
