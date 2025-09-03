@@ -1,7 +1,7 @@
 // server.js
 const express = require('express');
 const app = express();
-const { saveResponse } = require('./db');
+const { saveResponse, getAllResponses, clearResponses } = require('./db');
 
 app.use(express.json());
 
@@ -30,6 +30,26 @@ app.post('/slack/events', async (req, res) => {
   }
 
   res.status(200).send();
+});
+
+// endpoint para ver tudo
+app.get('/debug/responses', async (req, res) => {
+  try {
+    const responses = await getAllResponses();
+    res.json(responses);
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
+// endpoint para limpar
+app.get('/debug/clear', async (req, res) => {
+  try {
+    await clearResponses();
+    res.send("Responses cleared");
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
 });
 
 module.exports = app;
