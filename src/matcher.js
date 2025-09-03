@@ -7,7 +7,7 @@ const slackClient = require('./slackClient');
 async function runMatcher() {
   const responses = await getAllResponses();
 
-  if (responses.length < 2) {
+  if (responses.length < 1) {
     console.log("Not enough users to match.");
     return;
   }
