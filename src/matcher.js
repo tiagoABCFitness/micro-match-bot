@@ -3,6 +3,15 @@ require('dotenv').config();
 const { getAllResponses } = require('./db');
 const slackClient = require('./slackClient');
 
+function sanitizeChannelName(name) {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .substring(0, 80);
+}
+
 // Main matcher function using exact topic matching
 async function runMatcher() {
   const responses = await getAllResponses();
@@ -20,64 +29,51 @@ async function runMatcher() {
     return;
   }
 
-  const matches = [];
-  const used = new Set();
 
-  // Find exact topic matches
-  for (let i = 0; i < responses.length; i++) {
-    if (used.has(responses[i].userId)) continue;
-
-    for (let j = i + 1; j < responses.length; j++) {
-      if (used.has(responses[j].userId)) continue;
-
-      // check if they share at least one topic
-      const common = responses[i].topics.filter(t => responses[j].topics.includes(t));
-      if (common.length > 0) {
-        matches.push({
-          users: [responses[i].userId, responses[j].userId],
-          commonTopics: common
-        });
-        used.add(responses[i].userId);
-        used.add(responses[j].userId);
-        break;
-      }
+    // Agrupar utilizadores por tópico
+    const topicGroups = {};
+    for (const { userId, topics } of responses) {
+        for (const topic of topics) {
+            if (!topicGroups[topic]) topicGroups[topic] = new Set();
+            topicGroups[topic].add(userId);
+        }
     }
-  }
 
-  console.log('Matches found:', matches);
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
-  // Create Slack channels
-  const today = new Date().toISOString().slice(0,10).replace(/-/g,''); // YYYYMMDD
-  for (const match of matches) {
-    const mainTopic = match.commonTopics[0].toLowerCase().replace(/\s+/g,''); // remove spaces
-    const channelName = `micromatch-${mainTopic}-${today}`;
+    for (const [topic, userSet] of Object.entries(topicGroups)) {
+        const users = Array.from(userSet);
+        if (users.length >= minGroupSize) {
+            const rawChannelName = `micromatch-${topic}-${today}`;
+            const channelName = sanitizeChannelName(rawChannelName);
 
-    try {
-      const channelRes = await slackClient.conversations.create({
-        name: channelName,
-        is_private: true
-      });
+            try {
+                const channelRes = await slackClient.conversations.create({
+                    name: channelName,
+                    is_private: true
+                });
 
-      await slackClient.conversations.invite({
-        channel: channelRes.channel.id,
-        users: match.users.join(',')
-      });
+                await slackClient.conversations.invite({
+                    channel: channelRes.channel.id,
+                    users: users.join(',')
+                });
 
-      await slackClient.chat.postMessage({
-        channel: channelRes.channel.id,
-        text: `🎉 You’ve been matched! Common topics: ${match.commonTopics.join(', ')}.\nHere’s a conversation starter: *What’s something new you learned about these topics recently?*`
-      });
+                await slackClient.chat.postMessage({
+                    channel: channelRes.channel.id,
+                    text: `🎉 You’ve been matched on *${topic}*! There are ${users.length} of you here.\nHere’s a conversation starter: *What’s something new you learned about ${topic} recently?*`
+                });
 
-      console.log(`Channel created: ${channelName}`);
-    } catch (err) {
-      console.error('Error creating Slack channel:', err.message);
+                console.log(`Channel created: ${channelName} with ${users.length} users`);
+            } catch (err) {
+                console.error(`Error creating channel for topic "${topic}":`, err.message);
+            }
+        }
     }
-  }
 }
 
 // Run if called directly
 if (require.main === module) {
-  runMatcher();
+    runMatcher();
 }
 
 module.exports = { runMatcher };
