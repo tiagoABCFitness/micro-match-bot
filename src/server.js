@@ -1,33 +1,32 @@
+// server.js
 const express = require('express');
-const fs = require('fs');
 const app = express();
+const { saveResponse } = require('./db');
 
 app.use(express.json());
 
-app.post('/slack/events', (req, res) => {
+app.post('/slack/events', async (req, res) => {
   const { type, challenge, event } = req.body;
 
-  // URL verification
   if (type === 'url_verification') {
     res.setHeader('Content-Type', 'text/plain');
     return res.status(200).send(challenge);
   }
 
-  // Process direct messages
-  if (event && event.type === 'message' && event.channel_type === 'im') {
+  if (event && event.type === 'message' && event.channel_type === 'im' && !event.bot_id) {
     console.log(`Received message from ${event.user}: ${event.text}`);
 
-    // Save response
-    const responsesPath = './data/responses.json';
-    let responses = {};
+    const topics = event.text
+      .split(',')
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
 
-    if (fs.existsSync(responsesPath)) {
-      responses = JSON.parse(fs.readFileSync(responsesPath));
+    try {
+      await saveResponse(event.user, topics);
+      console.log(`Saved response for ${event.user}:`, topics);
+    } catch (err) {
+      console.error('DB error:', err.message);
     }
-
-    responses[event.user] = event.text;
-
-    fs.writeFileSync(responsesPath, JSON.stringify(responses, null, 2));
   }
 
   res.status(200).send();
