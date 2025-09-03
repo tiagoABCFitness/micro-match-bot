@@ -22,9 +22,9 @@ async function runMatcher() {
   * access https://micro-match-bot-d6dc1712503c.herokuapp.com/debug/responses
   * copy the vector and paste */
 
-  //const responses = PASTE_YOUR_VECTOR_HERE;
+ // const responses = [{"userId":"U06LV9HB79D","topics":["dance","fitness"],"timestamp":"2025-09-03T12:29:20.988Z"},{"userId":"U07V65Q33MY","topics":["cinema","dance"],"timestamp":"2025-09-03T12:29:34.508Z"}];
 
-  if (responses.length < 1) {
+  if (responses.length < 2) {
     console.log("Not enough users to match.");
     return;
   }
@@ -43,7 +43,7 @@ async function runMatcher() {
 
     for (const [topic, userSet] of Object.entries(topicGroups)) {
         const users = Array.from(userSet);
-        if (users.length >= minGroupSize) {
+        if (users.length >= 2) {
             const rawChannelName = `micromatch-${topic}-${today}`;
             const channelName = sanitizeChannelName(rawChannelName);
 
