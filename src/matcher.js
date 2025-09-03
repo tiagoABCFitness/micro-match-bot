@@ -7,6 +7,14 @@ const slackClient = require('./slackClient');
 async function runMatcher() {
   const responses = await getAllResponses();
 
+  /*for manual testing
+  * comment line above
+  * uncomment line below
+  * access https://micro-match-bot-d6dc1712503c.herokuapp.com/debug/responses
+  * copy the vector and paste */
+
+  //const responses = PASTE_YOUR_VECTOR_HERE;
+
   if (responses.length < 1) {
     console.log("Not enough users to match.");
     return;
@@ -41,8 +49,8 @@ async function runMatcher() {
   // Create Slack channels
   const today = new Date().toISOString().slice(0,10).replace(/-/g,''); // YYYYMMDD
   for (const match of matches) {
-    const mainTopic = match.commonTopics[0].replace(/\s+/g,''); // remove spaces
-    const channelName = `MicroMatchBot-${mainTopic}-${today}`;
+    const mainTopic = match.commonTopics[0].toLowerCase().replace(/\s+/g,''); // remove spaces
+    const channelName = `micromatch-${mainTopic}-${today}`;
 
     try {
       const channelRes = await slackClient.conversations.create({
