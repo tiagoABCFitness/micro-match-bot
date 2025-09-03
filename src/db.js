@@ -2,13 +2,11 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-//DB file path
-const dbPath = path.join(__dirname, 'data', 'responses.db');
+// aponta para a pasta data no root
+const dbPath = path.join(__dirname, '..', 'data', 'responses.db');
 
-//opens/creates db
 const db = new sqlite3.Database(dbPath);
 
-// creates table
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS responses (
@@ -52,4 +50,13 @@ function getAllResponses() {
   });
 }
 
-module.exports = { saveResponse, getAllResponses };
+function clearResponses() {
+  return new Promise((resolve, reject) => {
+    db.run(`DELETE FROM responses`, [], function (err) {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+module.exports = { saveResponse, getAllResponses, clearResponses };
