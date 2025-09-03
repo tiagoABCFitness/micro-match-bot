@@ -1,12 +1,13 @@
-name: Slack Bot Weekly Message
+name: Slack Bot Automation
 
 on:
   schedule:
-    - cron: '00 13 * * 2'
-  workflow_dispatch:
+    - cron: '0 9 * * 1' # Monday 9:00 UTC → collect topics
+    - cron: '0 9 * * 5' # Friday 9:00 UTC → run matcher
+  workflow_dispatch: # manual trigger
 
 jobs:
-  send-message:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +22,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run bot
+      - name: Run bot on Monday
+        if: github.event.schedule == '0 13 * * 1'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: node src/index.js
+
+      - name: Run matcher on Friday
+        if: github.event.schedule == '0 13 * * 5'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: node src/index.js

@@ -52,4 +52,48 @@ app.get('/debug/clear', async (req, res) => {
   }
 });
 
+// Endpoint de debug: mostra matches sem criar canais
+app.get('/debug/matches', async (req, res) => {
+  try {
+    const responses = await getAllResponses();
+
+    if (responses.length < 2) {
+      return res.json({ message: "Not enough users to match." });
+    }
+
+    const matches = [];
+    const used = new Set();
+    const today = new Date().toISOString().slice(0,10).replace(/-/g,''); // YYYYMMDD
+
+    for (let i = 0; i < responses.length; i++) {
+      if (used.has(responses[i].userId)) continue;
+
+      for (let j = i + 1; j < responses.length; j++) {
+        if (used.has(responses[j].userId)) continue;
+
+        const common = responses[i].topics.filter(t => responses[j].topics.includes(t));
+        if (common.length > 0) {
+          const mainTopic = common[0].replace(/\s+/g,'');
+          const channelName = `MicroMatchBot-${mainTopic}-${today}`;
+
+          matches.push({
+            users: [responses[i].userId, responses[j].userId],
+            commonTopics: common,
+            simulatedChannel: channelName
+          });
+
+          used.add(responses[i].userId);
+          used.add(responses[j].userId);
+          break;
+        }
+      }
+    }
+
+    res.json(matches);
+
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
 module.exports = app;

@@ -1,5 +1,7 @@
+require('dotenv').config();
 const { sendMessageToUsers } = require('./messageHandler');
 const app = require('./server');
+const { runMatcher } = require('./matcher');
 
 const PORT = process.env.PORT || 3000;
 
@@ -7,16 +9,22 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Mensagem inicial opcional (de preferência, acionada depois)
-async function sendInitialMessages() {
-  try {
-    const message = `Hi there! What are your interests today? Reply with one or more categories.`;
-    await sendMessageToUsers(message);
-    console.log('Message sent successfully!');
-  } catch (error) {
-    console.error('Error sending message:', error.message);
-  }
-}
+// Detect day of week (UTC)
+const today = new Date().getUTCDay(); // 0=Sunday, 1=Monday, ..., 5=Friday
 
-// enviar depois do start ou manualmente
-sendInitialMessages();
+(async () => {
+  try {
+    if (today === 1) { // Monday → send initial messages
+      const message = `Hi there! What are your interests today? Reply with one or more categories separated by commas (e.g., fitness, cinema, games).`;
+      await sendMessageToUsers(message);
+      console.log('Initial message sent to all users!');
+    }
+
+    if (today === 5) { // Friday → run matcher
+      await runMatcher();
+      console.log('Matcher executed successfully!');
+    }
+  } catch (err) {
+    console.error('Error during scheduled task:', err.message);
+  }
+})();
