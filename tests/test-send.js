@@ -1,4 +1,4 @@
-const { sendInterestMessages } = require('./src/index');
+const { sendInterestMessages } = require('../src/index');
 
 (async () => {
   try {

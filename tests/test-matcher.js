@@ -1,4 +1,4 @@
-const { executeMatcher } = require('./src/index');
+const { executeMatcher } = require('../src/index');
 
 (async () => {
   try {
