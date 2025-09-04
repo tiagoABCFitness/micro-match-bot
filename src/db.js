@@ -130,5 +130,14 @@ function updateUserCountry(userId, country) {
     });
 }
 
+function getAllUsers() {
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT user_id, name, consent, status, country, created_at, updated_at FROM users`,
+            [],
+            (err, rows) => (err ? reject(err) : resolve(rows))
+        );
+    });
+}
 
-module.exports = { saveResponse, getAllResponses, clearResponses, saveUser, getUser, setUserStatus, updateUserCountry };
+module.exports = { saveResponse, getAllResponses, clearResponses, saveUser, getUser, setUserStatus, updateUserCountry, getAllUsers };

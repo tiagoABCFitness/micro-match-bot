@@ -10,7 +10,8 @@ const {
     getUser,
     saveUser,
     setUserStatus,
-    updateUserCountry
+    updateUserCountry,
+    getAllUsers
 } = require('./db');
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
 const slackClient = require('./slackClient');
@@ -144,6 +145,15 @@ app.get('/debug/clear', async (req, res) => {
     try {
         await clearResponses();
         res.send('Responses cleared');
+    } catch (err) {
+        res.status(500).send(err.message);
+    }
+});
+
+app.get('/debug/users', async (req, res) => {
+    try {
+        const users = await getAllUsers();
+        res.json(users);
     } catch (err) {
         res.status(500).send(err.message);
     }
