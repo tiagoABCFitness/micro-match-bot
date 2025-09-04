@@ -70,36 +70,78 @@ async function sendReconsentMessage(userId) {
 // --- Handler do endpoint /slack/actions (botões)
 async function handleSlackActions(req, res) {
     try {
-        // Slack envia application/x-www-form-urlencoded → payload vem como string
         const payload = JSON.parse(req.body.payload);
         const userId = payload.user.id;
+        const action = payload.actions?.[0];
 
-        if (payload.type === 'block_actions') {
-            const action = payload.actions?.[0];
-            const name = await getUserName(userId);
+        // Estes dois campos identificam a mensagem original com botões
+        const channelId = payload.container?.channel_id || payload.channel?.id;
+        const messageTs = payload.container?.message_ts || payload.message?.ts;
 
-            if (action?.action_id === 'consent_yes') {
-                await saveUser(userId, name, true, 'awaiting_country');
-                await slackClient.chat.postMessage({
-                    channel: userId,
-                    text: `🚀 Great, ${name}! In which country do you live?`
-                });
-            }
+        const name = await getUserName(userId);
 
-            if (action?.action_id === 'consent_no') {
-                await saveUser(userId, name, false, 'inactive');
-                await slackClient.chat.postMessage({
-                    channel: userId,
-                    text: `👍 No problem, ${name}! If you change your mind, just send me a message anytime.`
-                });
-            }
+        if (action?.action_id === 'consent_yes') {
+            // 1) Atualiza DB / fluxo
+            await saveUser(userId, name, true, 'awaiting_country');
+
+            // 2) **ATUALIZA A MENSAGEM ORIGINAL** → remove botões
+            await slackClient.chat.update({
+                channel: channelId,
+                ts: messageTs,
+                text: `✅ Choice recorded`,
+                blocks: [
+                    {
+                        type: 'section',
+                        text: { type: 'mrkdwn', text: `✅ Thanks, *${name}*! Your choice was recorded.` }
+                    },
+                    {
+                        type: 'context',
+                        elements: [
+                            { type: 'mrkdwn', text: '_You can change this later by messaging me again._' }
+                        ]
+                    }
+                ]
+            });
+
+            // 3) Envia a próxima mensagem do fluxo
+            await slackClient.chat.postMessage({
+                channel: userId,
+                text: `🚀 Great, ${name}! In which country do you live?`
+            });
         }
 
-        // Responder 200 rapidamente para o Slack não repetir a entrega
+        if (action?.action_id === 'consent_no') {
+            await saveUser(userId, name, false, 'inactive');
+
+            // **ATUALIZA A MENSAGEM ORIGINAL** → remove botões
+            await slackClient.chat.update({
+                channel: channelId,
+                ts: messageTs,
+                text: `❌ Choice recorded`,
+                blocks: [
+                    {
+                        type: 'section',
+                        text: { type: 'mrkdwn', text: `❌ No worries, *${name}*. Choice recorded.` }
+                    },
+                    {
+                        type: 'context',
+                        elements: [
+                            { type: 'mrkdwn', text: '_If you change your mind, just send me a message._' }
+                        ]
+                    }
+                ]
+            });
+
+            await slackClient.chat.postMessage({
+                channel: userId,
+                text: `👍 No problem, ${name}! If you change your mind, just send me a message anytime.`
+            });
+        }
+
         return res.status(200).send();
     } catch (err) {
         console.error('Error in /slack/actions handler:', err.message);
-        return res.status(200).send(); // ainda assim 200 p/ Slack
+        return res.status(200).send();
     }
 }
 
