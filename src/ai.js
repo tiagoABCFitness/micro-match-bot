@@ -7,7 +7,7 @@ const getClient = (() => {
     return () => {
         if (!clientPromise) {
             clientPromise = (async () => {
-                const { AzureOpenAI } = await import('openai'); // <- ESM import
+                const { AzureOpenAI } = await import('openai');
                 return new AzureOpenAI({
                     apiKey: process.env.AZURE_OPENAI_API_KEY,
                     endpoint: process.env.AZURE_OPENAI_ENDPOINT,
@@ -27,7 +27,6 @@ function safeParseJSON(str) {
         .replace(/^```\s*/i, '')
         .replace(/```$/i, '');
     try { return JSON.parse(clean); } catch {}
-    // tenta apanhar só o bloco {...}
     const m = clean.match(/\{[\s\S]*\}$/);
     if (m) { try { return JSON.parse(m[0]); } catch {} }
     return null;
@@ -75,7 +74,6 @@ async function analyzeInterests(freeText) {
         return { reply: 'Podes contar-me um pouco mais sobre os teus interesses?', interests: [] };
     }
 
-    // normalização leve
     const uniq = Array.from(new Set(json.interests.map(s => String(s).trim().toLowerCase()).filter(Boolean)));
     return { reply: json.reply?.trim() || '', interests: uniq.slice(0, 7) };
 }
@@ -110,7 +108,6 @@ async function culturalTopicSuggestions(countryRaw, max = 5) {
     const json = safeParseJSON(raw);
     const topics = Array.isArray(json?.topics) ? json.topics : [];
 
-    // Normalizar e limitar
     const clean = Array.from(new Set(
         topics.map(s => String(s).trim().toLowerCase()).filter(Boolean)
     )).slice(0, max);
@@ -118,4 +115,33 @@ async function culturalTopicSuggestions(countryRaw, max = 5) {
     return clean;
 }
 
-module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions };
+/** Normaliza/agrupa tópicos semelhantes → categoria canónica */
+async function canonicalizeTopics(topics) {
+    if (!Array.isArray(topics) || !topics.length) return {};
+    const client = await getClient();
+
+    const system = `You normalize user interest topics to canonical categories.\n- Merge synonyms, brands, subdisciplines into a parent category when it helps matching.\n- Examples: [fitness, pilates, yoga] => fitness; [nintendo, playstation, xbox, gaming] => gaming; [soccer, futebol] => football; [cinema, movies, film] => movies.\n- Keep category names concise (singular nouns when natural), lowercase, ASCII only.\n- If a topic is already canonical, keep it.\n- Output a single JSON object mapping each ORIGINAL topic (as given) to a CANONICAL category.\n- Include ALL given topics as keys.\n- Do not add extra commentary.`;
+
+    const user = `Topics to normalize (comma-separated):\n${topics.join(', ')}`;
+
+    const resp = await client.chat.completions.create({
+        model: process.env.AZURE_OPENAI_DEPLOYMENT,
+        temperature: 0.2,
+        max_tokens: 500,
+        messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+        ]
+    });
+
+    const text = resp.choices?.[0]?.message?.content?.trim() || '{}';
+    const mapping = safeParseJSON(text) || {};
+
+    for (const t of topics) {
+        if (!mapping[t]) mapping[t] = String(t).trim().toLowerCase();
+        else mapping[t] = String(mapping[t]).trim().toLowerCase();
+    }
+    return mapping;
+}
+
+module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions, canonicalizeTopics };

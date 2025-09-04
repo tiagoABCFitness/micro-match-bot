@@ -28,13 +28,6 @@ db.serialize(() => {
                                              updated_at TEXT
         )
     `);
-
-    // migration: add match_pref if table already existed without it
-    db.run(`ALTER TABLE users ADD COLUMN match_pref TEXT`, [], (err) => {
-        if (err && !/duplicate column name/i.test(err.message)) {
-            console.warn('ALTER TABLE users ADD COLUMN match_pref failed:', err.message);
-        }
-    });
 });
 
 // -------- responses --------
@@ -79,6 +72,15 @@ function getAllResponses() {
 function clearResponses() {
     return new Promise((resolve, reject) => {
         db.run(`DELETE FROM responses`, [], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+function clearUsers() {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM users`, [], function (err) {
             if (err) reject(err);
             else resolve();
         });
@@ -183,6 +185,7 @@ module.exports = {
     saveResponse,
     getAllResponses,
     clearResponses,
+    clearUsers,
     // users
     saveUser,
     getUser,

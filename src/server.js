@@ -4,12 +4,14 @@ require('dotenv').config();
 const express = require('express');
 const { WebClient } = require('@slack/web-api');
 const app = express();
+const { runMatcher } = require('./matcher');
 
 const { countryFunFact, analyzeInterests, culturalTopicSuggestions } = require('./ai.js');
 const {
     saveResponse,
     getAllResponses,
     clearResponses,
+    clearUsers,
     getUser,
     saveUser,
     setUserStatus,
@@ -64,6 +66,39 @@ function sample(list, n = 5) {
     }
     return a.slice(0, Math.max(0, Math.min(n, a.length)));
 }
+
+async function sendNoMatchOptions(userId, groupRooms) {
+    if (!groupRooms.length) {
+        await slackClient.chat.postMessage({
+            channel: userId,
+            text: "😔 This time we couldn't match you and there are no group rooms available."
+        });
+        return;
+    }
+
+    const blocks = [
+        {
+            type: "section",
+            text: { type: "mrkdwn", text: "😔 This time we couldn't match you automatically.\nWould you like to join one of these group rooms instead?" }
+        },
+        {
+            type: "actions",
+            elements: groupRooms.map(room => ({
+                type: "button",
+                text: { type: "plain_text", text: room.topic },
+                value: JSON.stringify({ action: "join_group", channelId: room.channelId, topic: room.topic }),
+                action_id: "join_group"
+            }))
+        }
+    ];
+
+    await slackClient.chat.postMessage({
+        channel: userId,
+        text: "Choose a group to join",
+        blocks
+    });
+}
+
 
 /** Collect up to `max` unique topics from other users */
 async function collectCommunityTopics(currentUserId, max = 5) {
@@ -519,6 +554,29 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        if (actionId === 'join_group') {
+            const { channelId, topic } = JSON.parse(payload.actions[0].value);
+            try {
+                await slackClient.conversations.invite({ channel: channelId, users: userId });
+                await slackClient.chat.postMessage({
+                    channel: channelId,
+                    text: `👋 <@${userId}> joined this *${topic}* group!`
+                });
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: `✅ You’ve been added to the *${topic}* group. Enjoy!`
+                });
+            } catch (err) {
+                console.error("Error adding user to group:", err);
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: "⚠️ Sorry, something went wrong adding you to the group."
+                });
+            }
+            return res.sendStatus(200);
+        }
+
+
         return handleSlackActions(req, res);
     } catch (e) {
         console.error('Error in /slack/actions:', e.message);
@@ -540,6 +598,8 @@ app.get('/debug/clear', async (req, res) => {
     try {
         await clearResponses();
         res.send('Responses cleared');
+        await clearUsers();
+        res.send('Users cleared');
     } catch (err) {
         res.status(500).send(err.message);
     }
@@ -550,6 +610,25 @@ app.get('/debug/users', async (req, res) => {
         const users = await getAllUsers();
         res.json(users);
     } catch (err) {
+        res.status(500).send(err.message);
+    }
+});
+
+app.get('/debug/match', async (req, res) => {
+    try {
+        const { created, unmatched } = await runMatcher();
+
+        const groupRooms = created
+            .filter(c => c.type === 'group')
+            .map(c => ({ topic: c.topic, channelId: c.channelId }));
+
+        for (const uid of unmatched) {
+            await sendNoMatchOptions(uid, groupRooms);
+        }
+
+        res.json({ created, unmatched });
+    } catch (err) {
+        console.error('Error running matcher:', err);
         res.status(500).send(err.message);
     }
 });
