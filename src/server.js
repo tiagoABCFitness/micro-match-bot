@@ -182,7 +182,7 @@ app.post('/slack/events', async (req, res) => {
                 if (interests.length === 0) {
                     await slackClient.chat.postMessage({
                         channel: userId,
-                        text: "Tell me a bit about what you enjoy or want to learn, and I'll suggest a list for you to confirm."
+                        text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match."
                     });
                     return res.status(200).send();
                 }
