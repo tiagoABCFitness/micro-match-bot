@@ -20,6 +20,7 @@ db.serialize(() => {
         CREATE TABLE IF NOT EXISTS users (
          user_id TEXT PRIMARY KEY,
          name TEXT,
+         country TEXT,
          consent INTEGER DEFAULT 0,
          status TEXT DEFAULT 'new',
          created_at TEXT,
@@ -101,4 +102,33 @@ function getUser(userId) {
     });
 }
 
-module.exports = { saveResponse, getAllResponses, clearResponses, saveUser, getUser };
+function setUserStatus(userId, status) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `UPDATE users SET status = ?, updated_at = ? WHERE user_id = ?`,
+            [status, ts, userId],
+            function (err) {
+                if (err) reject(err);
+                else resolve();
+            }
+        );
+    });
+}
+
+function updateUserCountry(userId, country) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `UPDATE users SET country = ?, updated_at = ? WHERE user_id = ?`,
+            [country, ts, userId],
+            function (err) {
+                if (err) reject(err);
+                else resolve();
+            }
+        );
+    });
+}
+
+
+module.exports = { saveResponse, getAllResponses, clearResponses, saveUser, getUser, setUserStatus, updateUserCountry };

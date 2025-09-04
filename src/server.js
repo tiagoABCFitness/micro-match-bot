@@ -3,59 +3,122 @@ require('dotenv').config();
 const express = require('express');
 const app = express();
 
-const { saveResponse, getAllResponses, clearResponses, getUser, saveUser } = require('./db');
-const { sendConsentMessage, sendReconsentMessage, handleSlackActions, getUserName } = require('./consent');
+const {
+    saveResponse,
+    getAllResponses,
+    clearResponses,
+    getUser,
+    saveUser,
+    setUserStatus,
+    updateUserCountry
+} = require('./db');
+const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
 const slackClient = require('./slackClient');
 
-// Slack events usam JSON
+// Slack Events usam JSON; Slack Interactivity usa x-www-form-urlencoded
 app.use(express.json());
-// Slack interactivity usa application/x-www-form-urlencoded
 app.use(express.urlencoded({ extended: true }));
 
 // --- Slack Events (DMs ao bot)
 app.post('/slack/events', async (req, res) => {
     const { type, challenge, event } = req.body;
 
+    // Slack URL verification
     if (type === 'url_verification') {
         res.setHeader('Content-Type', 'text/plain');
         return res.status(200).send(challenge);
     }
 
+    // Apenas mensagens por DM e não enviadas por bot
     if (event && event.type === 'message' && event.channel_type === 'im' && !event.bot_id) {
         const userId = event.user;
 
         try {
             let user = await getUser(userId);
 
+            // 1) Novo utilizador → iniciar consentimento
             if (!user) {
-                // New user → first-time consent
                 const userName = await getUserName(userId);
-                await sendConsentMessage(userId); // primeira vez (revisit = false)
+                await sendConsentMessage(userId);
                 await saveUser(userId, userName, 0, 'awaiting_consent');
                 console.log(`New user ${userName} (${userId}) triggered consent flow.`);
                 return res.status(200).send();
             }
 
-// RECONSENT: if user exists but did not consent, re-trigger consent with a different copy
+            // 2) Utilizador sem consentimento → pedir novamente (re-consent)
             if (!user.consent) {
-                const name = user.name || (await getUserName(userId));
-                await sendReconsentMessage(userId); // <- a nova mensagem “Glad to see you again…”
-                await saveUser(userId, name, 0, 'awaiting_consent'); // volta a estado de consentimento pendente
-                console.log(`User ${name} (${userId}) re-triggered consent flow.`);
+                await sendConsentMessage(userId, { revisit: true });
+                await setUserStatus(userId, 'awaiting_consent');
+                console.log(`User ${user.name || userId} (${userId}) asked to re-consent.`);
                 return res.status(200).send();
             }
 
+            // 3) À espera do país → NÃO guardar como interesse
+            if (user.status === 'awaiting_country') {
+                const country = (event.text || '').trim();
+                if (!country) {
+                    await slackClient.chat.postMessage({
+                        channel: userId,
+                        text: 'Please tell me your country (e.g., Portugal).'
+                    });
+                    return res.status(200).send();
+                }
 
-            // Fluxo normal (como antes): guardar interesses
-            console.log(`Received message from ${event.user}: ${event.text}`);
+                await updateUserCountry(userId, country);
+                await setUserStatus(userId, 'awaiting_interests');
 
-            const topics = event.text
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: `Great — noted *${country}*. Now, what are your interests?\nReply with a few topics separated by commas (e.g., fitness, cinema, games).`
+                });
+                return res.status(200).send();
+            }
+
+            // 4) À espera dos interesses → agora sim guardar em responses
+            if (user.status === 'awaiting_interests') {
+                const topics = (event.text || '')
+                    .split(',')
+                    .map(t => t.trim().toLowerCase())
+                    .filter(Boolean);
+
+                if (topics.length === 0) {
+                    await slackClient.chat.postMessage({
+                        channel: userId,
+                        text: 'Please send at least one interest (comma-separated). For example: fitness, cinema, games'
+                    });
+                    return res.status(200).send();
+                }
+
+                await saveResponse(userId, topics);
+                await setUserStatus(userId, 'active');
+
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: `Perfect! I saved your interests: *${topics.join(', ')}*.\nI'll try to match you on Friday.`
+                });
+                return res.status(200).send();
+            }
+
+            // 5) Utilizador ativo → comportamento antigo (atualiza interesses)
+            console.log(`Received message from ${userId}: ${event.text}`);
+            const topics = (event.text || '')
                 .split(',')
                 .map(t => t.trim().toLowerCase())
-                .filter(t => t.length > 0);
+                .filter(Boolean);
 
-            await saveResponse(event.user, topics);
-            console.log(`Saved response for ${event.user}:`, topics);
+            if (topics.length > 0) {
+                await saveResponse(userId, topics);
+                console.log(`Saved interests for ${userId}:`, topics);
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: `Updated your interests to: *${topics.join(', ')}*.`
+                });
+            } else {
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: 'Send interests separated by commas (e.g., fitness, cinema, games).'
+                });
+            }
         } catch (err) {
             console.error('Error in /slack/events:', err.message);
         }
