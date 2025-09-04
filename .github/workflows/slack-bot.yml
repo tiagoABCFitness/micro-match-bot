@@ -23,13 +23,13 @@ jobs:
         run: npm install
 
       - name: Run bot on Monday
-        if: github.event.schedule == '0 13 * * 1'
+        if: github.event.schedule == '0 9 * * 1'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: node src/index.js
 
       - name: Run matcher on Friday
-        if: github.event.schedule == '0 13 * * 5'
+        if: github.event.schedule == '0 9 * * 5'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: node src/index.js

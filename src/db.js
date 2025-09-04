@@ -15,6 +15,18 @@ db.serialize(() => {
       timestamp TEXT
     )
   `);
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+         user_id TEXT PRIMARY KEY,
+         name TEXT,
+         consent INTEGER DEFAULT 0,
+         status TEXT DEFAULT 'new',
+         reated_at TEXT,
+         updated_at TEXT
+        )
+    `);
+
 });
 
 function saveResponse(userId, topics) {
@@ -59,4 +71,34 @@ function clearResponses() {
   });
 }
 
-module.exports = { saveResponse, getAllResponses, clearResponses };
+function saveUser(userId, name, consent, status) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `INSERT INTO users (user_id, name, consent, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(user_id)
+       DO UPDATE SET
+                name=excluded.name,
+                               consent=excluded.consent,
+                               status=excluded.status,
+                               updated_at=excluded.updated_at`,
+            [userId, name, consent ? 1 : 0, status, ts, ts],
+            function (err) {
+                if (err) reject(err);
+                else resolve();
+            }
+        );
+    });
+}
+
+function getUser(userId) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT * FROM users WHERE user_id = ?`, [userId], (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+        });
+    });
+}
+
+module.exports = { saveResponse, getAllResponses, clearResponses, saveUser, getUser };

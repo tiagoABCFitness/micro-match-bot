@@ -10,11 +10,57 @@ app.listen(PORT, () => {
 });
 
 // Função para envio de mensagens (segunda-feira)
+// async function sendInterestMessages() {
+//   const message = `Hi there! What are your interests today? Reply with one or more categories separated by commas (e.g., fitness, cinema, games).`;
+//   await sendMessageToUsers(message);
+//   console.log('Initial message sent to all users!');
+// }
+
 async function sendInterestMessages() {
-  const message = `Hi there! What are your interests today? Reply with one or more categories separated by commas (e.g., fitness, cinema, games).`;
-  await sendMessageToUsers(message);
-  console.log('Initial message sent to all users!');
+    const blocks = [
+        {
+            type: "section",
+            text: {
+                type: "mrkdwn",
+                text: "Hi! Would you like to connect with other people in the company?"
+            }
+        },
+        {
+            type: "actions",
+            elements: [
+                {
+                    type: "button",
+                    text: {
+                        type: "plain_text",
+                        text: "Yes"
+                    },
+                    style: "primary",
+                    value: "yes_connect",
+                    action_id: "yes_button"
+                },
+                {
+                    type: "button",
+                    text: {
+                        type: "plain_text",
+                        text: "No"
+                    },
+                    style: "danger",
+                    value: "no_connect",
+                    action_id: "no_button"
+                }
+            ]
+        }
+    ];
+
+    await sendMessageToUsers({
+        text: "Would you like to connect with other people in the company?",
+        blocks
+    });
+
+    console.log('Interactive message sent to all users!');
 }
+
+
 
 // Função para matcher (sexta-feira)
 async function executeMatcher() {
