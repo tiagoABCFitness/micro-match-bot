@@ -92,4 +92,4 @@ async function sendConsentMessage(userId) {
     await slackClient.chat.postMessage(message);
 }
 
-module.exports = { app, sendConsentMessage };
+module.exports = { app, sendConsentMessage, getUserName };
