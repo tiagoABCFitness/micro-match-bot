@@ -22,7 +22,7 @@ db.serialize(() => {
          name TEXT,
          consent INTEGER DEFAULT 0,
          status TEXT DEFAULT 'new',
-         reated_at TEXT,
+         created_at TEXT,
          updated_at TEXT
         )
     `);
