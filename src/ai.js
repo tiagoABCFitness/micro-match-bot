@@ -80,4 +80,42 @@ async function analyzeInterests(freeText) {
     return { reply: json.reply?.trim() || '', interests: uniq.slice(0, 7) };
 }
 
-module.exports = { countryFunFact, analyzeInterests };
+// --- nova função IA para sugestões culturais ---
+async function culturalTopicSuggestions(countryRaw, max = 5) {
+    const client = await getClient();
+    const country = (countryRaw || 'your country').toString().trim();
+
+    const prompt = [
+        `Task: propose up to ${max} cultural discussion topics for someone living in "${country}".`,
+        `Output STRICT JSON as: {"topics": string[]}`,
+        `Guidelines:`,
+        `- Each topic: 1–3 words, lowercase, no emojis.`,
+        `- Diverse mix (e.g., food, music, festivals, sports, literature, cinema, landmarks, traditions).`,
+        `- Avoid duplicates or ultra-generic terms like "culture".`,
+        `- No explanations, JSON only.`
+    ].join('\n');
+
+    const resp = await client.chat.completions.create({
+        model: process.env.AZURE_OPENAI_DEPLOYMENT,
+        temperature: 0.7,
+        max_tokens: 150,
+        messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `country: ${country}` },
+            { role: 'user', content: 'Return JSON only.' }
+        ],
+    });
+
+    const raw = resp.choices?.[0]?.message?.content || '';
+    const json = safeParseJSON(raw);
+    const topics = Array.isArray(json?.topics) ? json.topics : [];
+
+    // Normalizar e limitar
+    const clean = Array.from(new Set(
+        topics.map(s => String(s).trim().toLowerCase()).filter(Boolean)
+    )).slice(0, max);
+
+    return clean;
+}
+
+module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions };

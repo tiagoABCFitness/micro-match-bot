@@ -5,7 +5,7 @@ const express = require('express');
 const { WebClient } = require('@slack/web-api');
 const app = express();
 
-const { countryFunFact, analyzeInterests } = require('./ai.js');
+const { countryFunFact, analyzeInterests, culturalTopicSuggestions } = require('./ai.js');
 const {
     saveResponse,
     getAllResponses,
@@ -49,6 +49,62 @@ function replaceActionsWithNote(blocks, note) {
             ? { type: 'context', elements: [{ type: 'mrkdwn', text: note }] }
             : b
     );
+}
+
+/** Random sample up to n unique items */
+function sample(list, n = 5) {
+    const a = [...list];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a.slice(0, Math.max(0, Math.min(n, a.length)));
+}
+
+/** Collect up to `max` unique topics from other users */
+async function collectCommunityTopics(currentUserId, max = 5) {
+    try {
+        const rows = await getAllResponses();
+        const pool = new Set();
+        const addArr = (arr) => Array.isArray(arr) && arr.forEach(v => {
+            const s = String(v || '').trim().toLowerCase();
+            if (s) pool.add(s);
+        });
+
+        if (Array.isArray(rows)) {
+            for (const r of rows) {
+                const uid = r?.user_id || r?.userId || r?.slack_id || r?.user || r?.uid;
+                if (uid && uid === currentUserId) continue;
+
+                if (Array.isArray(r?.response)) addArr(r.response);
+                else if (Array.isArray(r?.responses)) addArr(r.responses);
+                else if (Array.isArray(r?.topics)) addArr(r.topics);
+                else if (typeof r === 'object' && r) {
+                    for (const v of Object.values(r)) {
+                        if (Array.isArray(v)) addArr(v);
+                    }
+                } else if (typeof r === 'string') {
+                    const s = r.trim().toLowerCase();
+                    if (s) pool.add(s);
+                }
+            }
+        }
+
+        return sample(Array.from(pool), max);
+    } catch (e) {
+        console.warn('collectCommunityTopics error:', e.message);
+        return [];
+    }
+}
+
+/** Reusable "Suggest topics" action block */
+function suggestTopicsButton() {
+    return {
+        type: 'actions',
+        elements: [
+            { type: 'button', text: { type: 'plain_text', text: 'Suggest topics' }, action_id: 'suggest_topics' }
+        ]
+    };
 }
 
 // Slack Events use JSON; Slack Interactivity uses x-www-form-urlencoded
@@ -117,7 +173,8 @@ app.post('/slack/events', async (req, res) => {
                     blocks: [
                         { type: 'section', text: { type: 'mrkdwn', text: baseText + (funFact ? `\n*Fun fact:* ${funFact}` : '') } },
                         { type: 'section', text: { type: 'mrkdwn', text: 'Now, tell me a bit about yourself — what topics would you like to discuss here, or what would you like to learn?' } },
-                        { type: 'context', elements: [{ type: 'mrkdwn', text: '_e.g., running, photography, programming, nutrition, English, investing…_' }] }
+                        { type: 'context', elements: [{ type: 'mrkdwn', text: '_e.g., running, photography, programming, nutrition, English, investing…_' }] },
+                        suggestTopicsButton()
                     ]
                 });
 
@@ -129,7 +186,11 @@ app.post('/slack/events', async (req, res) => {
                 if (!userText) {
                     await slackClient.chat.postMessage({
                         channel: userId,
-                        text: 'Please share a few lines about what you enjoy or want to learn.'
+                        text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match.",
+                        blocks: [
+                            { type: 'section', text: { type: 'mrkdwn', text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match." } },
+                            suggestTopicsButton()
+                        ]
                     });
                     return res.status(200).send();
                 }
@@ -140,7 +201,11 @@ app.post('/slack/events', async (req, res) => {
                 if (interests.length === 0) {
                     await slackClient.chat.postMessage({
                         channel: userId,
-                        text: "I didn't pick up enough interests. Could you add a bit more detail?"
+                        text: "I didn't pick up enough interests. Could you add a bit more detail?",
+                        blocks: [
+                            { type: 'section', text: { type: 'mrkdwn', text: "I didn't pick up enough interests. Could you add a bit more detail?" } },
+                            suggestTopicsButton()
+                        ]
                     });
                     // keep status as awaiting_interests_freeform
                     await setUserStatus(userId, 'awaiting_interests_freeform');
@@ -182,7 +247,11 @@ app.post('/slack/events', async (req, res) => {
                 if (interests.length === 0) {
                     await slackClient.chat.postMessage({
                         channel: userId,
-                        text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match."
+                        text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match.",
+                        blocks: [
+                            { type: 'section', text: { type: 'mrkdwn', text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match." } },
+                            suggestTopicsButton()
+                        ]
                     });
                     return res.status(200).send();
                 }
@@ -215,7 +284,11 @@ app.post('/slack/events', async (req, res) => {
             // If we get here, there was no text to process
             await slackClient.chat.postMessage({
                 channel: userId,
-                text: 'Please send a short message about your interests.'
+                text: 'Please send a short message about your interests.',
+                blocks: [
+                    { type: 'section', text: { type: 'mrkdwn', text: 'Please send a short message about your interests.' } },
+                    suggestTopicsButton()
+                ]
             });
         } catch (err) {
             console.error('Error in /slack/events:', err.message);
@@ -250,6 +323,42 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        // --- new: suggest topics ---
+        if (actionId === 'suggest_topics') {
+            // 1) Hide the button
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Suggestion requested.',
+                blocks: replaceActionsWithNote(originalBlocks, '*Suggestion requested*')
+            });
+
+            // 2) Prepare suggestions
+            const suggestions = await collectCommunityTopics(userId, 5);
+            let text;
+            if (suggestions.length > 0) {
+                text = `Here are a few topics other colleagues are into:\n${bullets(suggestions)}\n\nIf you'd like to use any of these, just tell me.`;
+            } else {
+                const user = await getUser(userId);
+                const country = user?.country || user?.Country || user?.location || 'your country';
+                let cultural = [];
+                try {
+                    cultural = await culturalTopicSuggestions(country, 5);
+                } catch (_) { cultural = []; }
+                // fallback simples se a IA falhar
+                if (!Array.isArray(cultural) || cultural.length === 0) {
+                    cultural = sample([
+                        `${country} cuisine`, `${country} music`, `${country} festivals`,
+                        `${country} football`, `${country} landmarks`, `${country} cinema`
+                    ].map(s => s.toLowerCase()), 5);
+                }
+                text = `I don't have topics from other colleagues yet. Since you're in ${country}, here are a few cultural ideas you could discuss:\n${bullets(cultural)}\n\nIf you'd like to use any of these, just tell me.`;
+            }
+
+            await slackClient.chat.postMessage({ channel, text });
+            return res.sendStatus(200);
+        }
+
         if (actionId === 'confirm_interests') {
             // 1) Hide buttons on the original message
             await slackClient.chat.update({
@@ -274,7 +383,7 @@ app.post('/slack/actions', async (req, res) => {
             await slackClient.chat.postMessage({
                 channel,
                 text: interests.length
-                    ? `Perfect! I saved your interests: *${interests.join(', ')}*.\nI'll try to match you on Friday.`
+                    ? `Perfect! I saved your interests: *${interests.join(', ')}*.\nI'll work on finding you a match.`
                     : `All set. You can message me any time to update your interests.`
             });
 
