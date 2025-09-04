@@ -4,7 +4,7 @@ const express = require('express');
 const app = express();
 
 const { saveResponse, getAllResponses, clearResponses, getUser, saveUser } = require('./db');
-const { sendConsentMessage } = require('./consent');
+const { sendConsentMessage, getUserName  } = require('./consent');
 const slackClient = require('./slackClient');
 
 app.use(express.json());
@@ -26,8 +26,9 @@ app.post('/slack/events', async (req, res) => {
 
             if (!user) {
                 // New user → trigger consent
+                const userName = await getUserName(userId);
                 await sendConsentMessage(userId);
-                await saveUser(userId, userId, 0, 'awaiting_consent');
+                await saveUser(userId, userName, 0, 'awaiting_consent');
                 console.log(`New user ${userId} triggered consent flow.`);
                 return res.status(200).send();
             }
