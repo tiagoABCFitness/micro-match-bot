@@ -41,6 +41,16 @@ function bullets(list) {
     return list.map(i => `• ${i}`).join('\n');
 }
 
+/** Replace any actions block with a context note (hides buttons after click) */
+function replaceActionsWithNote(blocks, note) {
+    const safe = Array.isArray(blocks) ? blocks : [];
+    return safe.map(b =>
+        b.type === 'actions'
+            ? { type: 'context', elements: [{ type: 'mrkdwn', text: note }] }
+            : b
+    );
+}
+
 // Slack Events use JSON; Slack Interactivity uses x-www-form-urlencoded
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -165,7 +175,6 @@ app.post('/slack/events', async (req, res) => {
             }
 
             // 5) Active user — propose updates from free text (no more comma parsing)
-            // If the user sends anything, treat it as a potential update and run the same analyze+confirm loop.
             if (userText) {
                 const analysis = await analyzeInterests(userText).catch(() => ({ reply: '', interests: [] }));
                 const interests = Array.isArray(analysis.interests) ? analysis.interests : [];
@@ -233,49 +242,61 @@ app.post('/slack/actions', async (req, res) => {
 
         const actionId = payload?.actions?.[0]?.action_id;
         const userId = payload?.user?.id;
-        const channel =
-            payload?.channel?.id ||
-            payload?.container?.channel_id;
+        const channel = payload?.channel?.id || payload?.container?.channel_id;
+        const ts = payload?.message?.ts || payload?.container?.message_ts;
+        const originalBlocks = payload?.message?.blocks || [];
 
-        if (!actionId || !userId || !channel) {
+        if (!actionId || !userId || !channel || !ts) {
             return res.sendStatus(200);
         }
 
         if (actionId === 'confirm_interests') {
+            // 1) Hide buttons on the original message
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Interests confirmed.',
+                blocks: replaceActionsWithNote(originalBlocks, '*Selection: Confirmed*')
+            });
+
+            // 2) Save and confirm
             const interests = pendingInterests.get(userId) || [];
-            if (interests.length === 0) {
-                await slackClient.chat.postMessage({
-                    channel,
-                    text: "I don't have any interests to save yet. Please share a bit more, and I'll propose a list again."
-                });
-                return res.sendStatus(200);
+            if (interests.length > 0) {
+                try {
+                    await saveResponse(userId, interests);
+                    await setUserStatus(userId, 'active');
+                } catch (e) {
+                    console.error('Error saving interests:', e);
+                }
             }
-
-            try {
-                await saveResponse(userId, interests);
-                await setUserStatus(userId, 'active');
-            } catch (e) {
-                console.error('Error saving interests:', e);
-            }
-
             pendingInterests.delete(userId);
 
             await slackClient.chat.postMessage({
                 channel,
-                text: `Perfect! I saved your interests: *${interests.join(', ')}*.\nI'll try to match you on Friday.`
+                text: interests.length
+                    ? `Perfect! I saved your interests: *${interests.join(', ')}*.\nI'll try to match you on Friday.`
+                    : `All set. You can message me any time to update your interests.`
             });
 
             return res.sendStatus(200);
         }
 
         if (actionId === 'refine_interests') {
-            // Clear current suggestions and ask for more detail
+            // 1) Hide buttons on the original message
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Awaiting more details…',
+                blocks: replaceActionsWithNote(originalBlocks, '*Selection: Provide more details*')
+            });
+
+            // 2) Ask for more info and keep phase
             pendingInterests.delete(userId);
             await setUserStatus(userId, 'awaiting_interests_freeform');
 
             await slackClient.chat.postMessage({
                 channel,
-                text: 'Great — tell me a bit more detail about what you enjoy or want to learn, and I will propose an updated list.'
+                text: 'Great — add a bit more detail about what you enjoy or want to learn, and I will propose an updated list.'
             });
 
             return res.sendStatus(200);
