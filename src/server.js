@@ -1,7 +1,7 @@
 // src/server.js
 require('dotenv').config();
-import { AI } from './ai.js';
-
+const { countryFunFact } = require('./ai.js');
+const { WebClient } = require('@slack/web-api');
 const express = require('express');
 const app = express();
 const {
@@ -69,13 +69,7 @@ app.post('/slack/events', async (req, res) => {
                 await updateUserCountry(userId, country);
                 await setUserStatus(userId, 'awaiting_interests');
 
-                let funFact;
-                try {
-                    funFact = await AI.getFunFact(country);
-                } catch (err) {
-                    console.error('Error fetching fun fact:', err.message);
-                    funFact = null;
-                }
+                const fact = await countryFunFact(country).catch(() => null);
 
                 const baseText = `Great — noted **${country}**.`;
                 const factText = funFact ? `\nDid you knew that: ${funFact}` : '';
