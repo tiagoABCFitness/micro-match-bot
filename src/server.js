@@ -69,7 +69,7 @@ app.post('/slack/events', async (req, res) => {
                 await updateUserCountry(userId, country);
                 await setUserStatus(userId, 'awaiting_interests');
 
-                const fact = await countryFunFact(country).catch(() => null);
+                const funFact = await countryFunFact(country).catch(() => null);
 
                 const baseText = `Great — noted **${country}**.`;
                 const factText = funFact ? `\nDid you knew that: ${funFact}` : '';
