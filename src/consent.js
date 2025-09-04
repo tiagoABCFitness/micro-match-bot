@@ -19,19 +19,24 @@ async function getUserName(userId) {
 }
 
 // --- Mensagem inicial de consentimento
-async function sendConsentMessage(userId) {
+async function sendConsentMessage(userId, { revisit = false } = {}) {
     const userName = await getUserName(userId);
+
+    const headline = revisit
+        ? `👋 Welcome back, *${userName}*!`
+        : `👋 Hello *${userName}*!`;
+
+    const body = revisit
+        ? `Glad to see you again. Do you want to try *Micro-Match* now?`
+        : `Welcome to *Micro-Match Bot*. This bot helps you meet colleagues with shared interests.\n\nDo you want to join this experience?`;
 
     const message = {
         channel: userId,
-        text: `Hello ${userName} 👋 Do you want to participate in Micro-Match this week?`,
+        text: `Hello ${userName} 👋 Do you want to participate in Micro-Match${revisit ? ' now' : ' this week'}?`,
         blocks: [
             {
                 type: 'section',
-                text: {
-                    type: 'mrkdwn',
-                    text: `👋 Hello *${userName}*! Welcome to *Micro-Match Bot*. This bot helps you meet colleagues with shared interests.\n\nDo you want to join this experience?`
-                }
+                text: { type: 'mrkdwn', text: `${headline}\n\n${body}` }
             },
             {
                 type: 'actions',
@@ -56,6 +61,10 @@ async function sendConsentMessage(userId) {
     };
 
     await slackClient.chat.postMessage(message);
+}
+
+async function sendReconsentMessage(userId) {
+    return sendConsentMessage(userId, { revisit: true });
 }
 
 // --- Handler do endpoint /slack/actions (botões)
@@ -94,4 +103,4 @@ async function handleSlackActions(req, res) {
     }
 }
 
-module.exports = { sendConsentMessage, getUserName, handleSlackActions };
+module.exports = { sendConsentMessage, sendReconsentMessage, getUserName, handleSlackActions };

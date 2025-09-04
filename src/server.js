@@ -4,7 +4,7 @@ const express = require('express');
 const app = express();
 
 const { saveResponse, getAllResponses, clearResponses, getUser, saveUser } = require('./db');
-const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
+const { sendConsentMessage, sendReconsentMessage, handleSlackActions, getUserName } = require('./consent');
 const slackClient = require('./slackClient');
 
 // Slack events usam JSON
@@ -28,18 +28,23 @@ app.post('/slack/events', async (req, res) => {
             let user = await getUser(userId);
 
             if (!user) {
-                // Novo user → dispara consentimento e regista estado inicial
+                // New user → first-time consent
                 const userName = await getUserName(userId);
-                await sendConsentMessage(userId);
+                await sendConsentMessage(userId); // primeira vez (revisit = false)
                 await saveUser(userId, userName, 0, 'awaiting_consent');
                 console.log(`New user ${userName} (${userId}) triggered consent flow.`);
                 return res.status(200).send();
             }
 
+// RECONSENT: if user exists but did not consent, re-trigger consent with a different copy
             if (!user.consent) {
-                console.log(`User ${userId} has not given consent. Ignoring message.`);
+                const name = user.name || (await getUserName(userId));
+                await sendReconsentMessage(userId); // <- a nova mensagem “Glad to see you again…”
+                await saveUser(userId, name, 0, 'awaiting_consent'); // volta a estado de consentimento pendente
+                console.log(`User ${name} (${userId}) re-triggered consent flow.`);
                 return res.status(200).send();
             }
+
 
             // Fluxo normal (como antes): guardar interesses
             console.log(`Received message from ${event.user}: ${event.text}`);
