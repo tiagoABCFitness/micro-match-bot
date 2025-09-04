@@ -14,15 +14,19 @@ const {
     saveUser,
     setUserStatus,
     updateUserCountry,
-    getAllUsers
+    getAllUsers,
+    // opcional: se já implementaste no db.js
+    updateUserMatchPreference
 } = require('./db');
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
 const slackClient = require('./slackClient');
 
 // ---------- Simple in-memory state ----------
-/** Pending interests waiting for user confirmation. userId -> string[] */
+/** userId -> string[] (pending interests to confirm) */
 const pendingInterests = new Map();
+/** userId -> '1:1' | 'group' (fallback only if DB method is missing) */
+const matchPrefMemory = new Map();
 
 // ---------- Helpers ----------
 function extractChannelId(body) {
@@ -105,6 +109,41 @@ function suggestTopicsButton() {
             { type: 'button', text: { type: 'plain_text', text: 'Suggest topics' }, action_id: 'suggest_topics' }
         ]
     };
+}
+
+/** Ask for match preference (1:1 vs Group) */
+async function askMatchPreference(userId) {
+    await slackClient.chat.postMessage({
+        channel: userId,
+        text: 'Before we match: do you prefer 1:1 or a group conversation?',
+        blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: '*Before we match:* do you prefer a 1:1 or a group conversation?' } },
+            {
+                type: 'actions',
+                elements: [
+                    { type: 'button', text: { type: 'plain_text', text: '1:1' }, style: 'primary', action_id: 'choose_match_1_1' },
+                    { type: 'button', text: { type: 'plain_text', text: 'Group' }, action_id: 'choose_match_group' }
+                ]
+            }
+        ]
+    });
+    // Enquanto espera a escolha, deixamos o estado explícito
+    await setUserStatus(userId, 'awaiting_match_pref');
+}
+
+/** Save match preference with DB if available; otherwise memory fallback */
+async function saveMatchPref(userId, pref) {
+    if (typeof updateUserMatchPreference === 'function') {
+        try {
+            await updateUserMatchPreference(userId, pref); // implementa no db.js: (user_id TEXT, match_pref TEXT)
+            return;
+        } catch (e) {
+            console.warn('updateUserMatchPreference failed, using memory fallback:', e.message);
+        }
+    } else {
+        console.warn('updateUserMatchPreference not implemented in db.js; using memory fallback.');
+    }
+    matchPrefMemory.set(userId, pref);
 }
 
 // Slack Events use JSON; Slack Interactivity uses x-www-form-urlencoded
@@ -207,7 +246,6 @@ app.post('/slack/events', async (req, res) => {
                             suggestTopicsButton()
                         ]
                     });
-                    // keep status as awaiting_interests_freeform
                     await setUserStatus(userId, 'awaiting_interests_freeform');
                     return res.status(200).send();
                 }
@@ -239,7 +277,43 @@ app.post('/slack/events', async (req, res) => {
                 return res.status(200).send();
             }
 
-            // 5) Active user — propose updates from free text (no more comma parsing)
+            // 5) Awaiting match preference → still allow users to send text to update topics
+            if (user.status === 'awaiting_match_pref' && userText) {
+                const analysis = await analyzeInterests(userText).catch(() => ({ reply: '', interests: [] }));
+                const interests = Array.isArray(analysis.interests) ? analysis.interests : [];
+
+                if (interests.length > 0) {
+                    pendingInterests.set(userId, interests);
+
+                    const intro = analysis.reply || 'Got it. Here is what I caught:';
+                    const list = bullets(interests);
+
+                    await slackClient.chat.postMessage({
+                        channel: userId,
+                        text: `${intro}\n\nProposed interests:\n${list}`,
+                        blocks: [
+                            { type: 'section', text: { type: 'mrkdwn', text: intro } },
+                            { type: 'section', text: { type: 'mrkdwn', text: `*Proposed interests:*\n${list}` } },
+                            {
+                                type: 'actions',
+                                elements: [
+                                    { type: 'button', text: { type: 'plain_text', text: 'Confirm' }, style: 'primary', action_id: 'confirm_interests' },
+                                    { type: 'button', text: { type: 'plain_text', text: 'Give more details' }, action_id: 'refine_interests' }
+                                ]
+                            }
+                        ]
+                    });
+                    return res.status(200).send();
+                }
+                // If no interests extracted, gently remind:
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: "I'm ready when you are — you can tell me more interests, or tap one of the options above."
+                });
+                return res.status(200).send();
+            }
+
+            // 6) Active user — propose updates from free text (no more comma parsing)
             if (userText) {
                 const analysis = await analyzeInterests(userText).catch(() => ({ reply: '', interests: [] }));
                 const interests = Array.isArray(analysis.interests) ? analysis.interests : [];
@@ -303,13 +377,11 @@ app.post('/slack/actions', async (req, res) => {
     try {
         const payloadStr = req.body?.payload;
         if (!payloadStr) {
-            // Fallback to original handler if any
             return handleSlackActions(req, res);
         }
 
         const payload = JSON.parse(payloadStr);
         if (payload?.type !== 'block_actions') {
-            // Delegate anything we don't explicitly handle
             return handleSlackActions(req, res);
         }
 
@@ -323,9 +395,8 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // --- new: suggest topics ---
+        // --- Suggest topics ---
         if (actionId === 'suggest_topics') {
-            // 1) Hide the button
             await slackClient.chat.update({
                 channel,
                 ts,
@@ -333,7 +404,6 @@ app.post('/slack/actions', async (req, res) => {
                 blocks: replaceActionsWithNote(originalBlocks, '*Suggestion requested*')
             });
 
-            // 2) Prepare suggestions
             const suggestions = await collectCommunityTopics(userId, 5);
             let text;
             if (suggestions.length > 0) {
@@ -345,7 +415,6 @@ app.post('/slack/actions', async (req, res) => {
                 try {
                     cultural = await culturalTopicSuggestions(country, 5);
                 } catch (_) { cultural = []; }
-                // fallback simples se a IA falhar
                 if (!Array.isArray(cultural) || cultural.length === 0) {
                     cultural = sample([
                         `${country} cuisine`, `${country} music`, `${country} festivals`,
@@ -359,8 +428,8 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        // --- Confirm interests ---
         if (actionId === 'confirm_interests') {
-            // 1) Hide buttons on the original message
             await slackClient.chat.update({
                 channel,
                 ts,
@@ -368,30 +437,30 @@ app.post('/slack/actions', async (req, res) => {
                 blocks: replaceActionsWithNote(originalBlocks, '*Selection: Confirmed*')
             });
 
-            // 2) Save and confirm
             const interests = pendingInterests.get(userId) || [];
             if (interests.length > 0) {
                 try {
                     await saveResponse(userId, interests);
-                    await setUserStatus(userId, 'active');
                 } catch (e) {
                     console.error('Error saving interests:', e);
                 }
             }
             pendingInterests.delete(userId);
 
+            // Em vez de terminar aqui, vamos pedir a preferência de match
             await slackClient.chat.postMessage({
                 channel,
                 text: interests.length
-                    ? `Perfect! I saved your interests: *${interests.join(', ')}*.\nI'll work on finding you a match.`
-                    : `All set. You can message me any time to update your interests.`
+                    ? `Perfect! I saved your interests: *${interests.join(', ')}*.`
+                    : `All set.`
             });
 
+            await askMatchPreference(userId); // define status awaiting_match_pref
             return res.sendStatus(200);
         }
 
+        // --- Refine interests ---
         if (actionId === 'refine_interests') {
-            // 1) Hide buttons on the original message
             await slackClient.chat.update({
                 channel,
                 ts,
@@ -399,7 +468,6 @@ app.post('/slack/actions', async (req, res) => {
                 blocks: replaceActionsWithNote(originalBlocks, '*Selection: Provide more details*')
             });
 
-            // 2) Ask for more info and keep phase
             pendingInterests.delete(userId);
             await setUserStatus(userId, 'awaiting_interests_freeform');
 
@@ -411,7 +479,46 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // Any other action -> delegate to original handler (consent, etc.)
+        // --- Choose match preference: 1:1 ---
+        if (actionId === 'choose_match_1_1') {
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Match preference selected.',
+                blocks: replaceActionsWithNote(originalBlocks, '*Match preference: 1:1*')
+            });
+
+            await saveMatchPref(userId, '1:1');
+            await setUserStatus(userId, 'active');
+
+            await slackClient.chat.postMessage({
+                channel,
+                text: "Great — we’ll prioritise creating a 1:1 room when other colleagues also chose 1:1. If that’s not possible, you’ll be added to a group so you don’t miss out."
+            });
+
+            return res.sendStatus(200);
+        }
+
+        // --- Choose match preference: Group ---
+        if (actionId === 'choose_match_group') {
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Match preference selected.',
+                blocks: replaceActionsWithNote(originalBlocks, '*Match preference: Group*')
+            });
+
+            await saveMatchPref(userId, 'group');
+            await setUserStatus(userId, 'active');
+
+            await slackClient.chat.postMessage({
+                channel,
+                text: "Got it — we’ll aim to place you into a group conversation."
+            });
+
+            return res.sendStatus(200);
+        }
+
         return handleSlackActions(req, res);
     } catch (e) {
         console.error('Error in /slack/actions:', e.message);
