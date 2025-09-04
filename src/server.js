@@ -1,5 +1,13 @@
-const { getUser, saveUser } = require('./db');
+// server.js
+require('dotenv').config();
+const express = require('express');
+const app = express();
+
+const { saveResponse, getAllResponses, clearResponses, getUser, saveUser } = require('./db');
 const { sendConsentMessage } = require('./consent');
+const slackClient = require('./slackClient');
+
+app.use(express.json());
 
 app.post('/slack/events', async (req, res) => {
     const { type, challenge, event } = req.body;
