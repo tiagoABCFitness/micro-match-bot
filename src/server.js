@@ -1,6 +1,6 @@
 // src/server.js
 require('dotenv').config();
-import { AI } from './AI.js';
+import { AI } from './ai.js';
 
 const express = require('express');
 const app = express();
