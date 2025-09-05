@@ -38,7 +38,7 @@ The result: stronger bonds, more collaboration, and a happier workplace 🎯.
 
 - **Deployment**  
   - Runs on **Heroku** (or compatible Node hosting)  
-  - Scheduler (Heroku Scheduler) triggers matches on Fridays  
+  - Scheduler (Heroku add-on) to trigger matching and topic collection
 
 ---
 
@@ -98,9 +98,7 @@ MATCH_HOST=your-app.herokuapp.com
    ```bash
    brew install sqlite
    ```
-   Use a tunneling service like **ngrok** to expose `/slack/events` and `/slack/actions` to Slack.  
-
-4. Test endpoints:  
+3. Test endpoints:  
    - `/debug/responses` – see saved responses  
    - `/debug/users` – see saved users
    - `/debug/match` – run matcher manually  
