@@ -39,4 +39,36 @@ async function sendMessageToUsers(message) {
     }
 }
 
-module.exports = { sendMessageToUsers };
+async function sendNoMatchOptions(userId, groupRooms) {
+    if (!groupRooms.length) {
+        await slackClient.chat.postMessage({
+            channel: userId,
+            text: "😔 This time we couldn't match you and there are no group rooms available."
+        });
+        return;
+    }
+
+    const blocks = [
+        {
+            type: "section",
+            text: { type: "mrkdwn", text: "😔 This time we couldn't match you automatically.\nWould you like to join one of these group rooms instead?" }
+        },
+        {
+            type: "actions",
+            elements: groupRooms.map(room => ({
+                type: "button",
+                text: { type: "plain_text", text: room.topic },
+                value: JSON.stringify({ action: "join_group", channelId: room.channelId, topic: room.topic }),
+                action_id: "join_group"
+            }))
+        }
+    ];
+
+    await slackClient.chat.postMessage({
+        channel: userId,
+        text: "Choose a group to join",
+        blocks
+    });
+}
+
+module.exports = { sendMessageToUsers, sendNoMatchOptions };

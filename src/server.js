@@ -23,6 +23,7 @@ const {
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
 const slackClient = require('./slackClient');
+const {sendNoMatchOptions} = require("./messageHandler");
 
 // ---------- Simple in-memory state ----------
 /** userId -> string[] (pending interests to confirm) */
@@ -67,39 +68,6 @@ function sample(list, n = 5) {
     return a.slice(0, Math.max(0, Math.min(n, a.length)));
 }
 
-async function sendNoMatchOptions(userId, groupRooms) {
-    if (!groupRooms.length) {
-        await slackClient.chat.postMessage({
-            channel: userId,
-            text: "😔 This time we couldn't match you and there are no group rooms available."
-        });
-        return;
-    }
-
-    const blocks = [
-        {
-            type: "section",
-            text: { type: "mrkdwn", text: "😔 This time we couldn't match you automatically.\nWould you like to join one of these group rooms instead?" }
-        },
-        {
-            type: "actions",
-            elements: groupRooms.map(room => ({
-                type: "button",
-                text: { type: "plain_text", text: room.topic },
-                value: JSON.stringify({ action: "join_group", channelId: room.channelId, topic: room.topic }),
-                action_id: "join_group"
-            }))
-        }
-    ];
-
-    await slackClient.chat.postMessage({
-        channel: userId,
-        text: "Choose a group to join",
-        blocks
-    });
-}
-
-
 /** Collect up to `max` unique topics from other users */
 async function collectCommunityTopics(currentUserId, max = 5) {
     try {
@@ -141,7 +109,7 @@ function suggestTopicsButton() {
     return {
         type: 'actions',
         elements: [
-            { type: 'button', text: { type: 'plain_text', text: 'Suggest topics' }, action_id: 'suggest_topics' }
+            { type: 'button', text: { type: 'plain_text', text: 'Show me topic examples' }, action_id: 'suggest_topics' }
         ]
     };
 }
@@ -616,6 +584,17 @@ app.get('/debug/users', async (req, res) => {
 
 app.get('/debug/match', async (req, res) => {
     try {
+        const token = req.query.token;
+        const today = new Date().getUTCDay(); // 0=Domingo ... 5=Sexta
+
+        // Se tem token (vem do Scheduler) → só corre às sextas
+        if (token) {
+            if (today !== 5) {
+                return res.json({ skipped: true, reason: 'Not Friday (UTC)' });
+            }
+        }
+
+        // Aqui corre sempre (se foi manual, ou se for sexta com token)
         const { created, unmatched } = await runMatcher();
 
         const groupRooms = created

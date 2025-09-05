@@ -1,6 +1,6 @@
 // index.js
 require('dotenv').config();
-const { sendMessageToUsers } = require('./messageHandler');
+const { sendMessageToUsers, sendNoMatchOptions } = require('./messageHandler');
 const app = require('./server');
 const { runMatcher } = require('./matcher');
 
@@ -19,8 +19,24 @@ async function sendInterestMessages() {
 
 // Função para matcher (sexta-feira)
 async function executeMatcher() {
-  await runMatcher();
-  console.log('Matcher executed successfully!');
+    try {
+        const { created, unmatched } = await runMatcher();
+
+        const groupRooms = created
+            .filter(c => c.type === 'group')
+            .map(c => ({ topic: c.topic, channelId: c.channelId }));
+
+        for (const uid of unmatched) {
+            await sendNoMatchOptions(uid, groupRooms);
+        }
+
+        // Return the result instead of sending a response
+        return { created, unmatched };
+    } catch (err) {
+        console.error('Error running matcher:', err);
+        // Optionally rethrow or return error info
+        throw err;
+    }
 }
 
 // Execução automática via cron
