@@ -180,6 +180,73 @@ function getAllUsers() {
     });
 }
 
+// -------- deletes / opt-out --------
+
+/** Apaga todas as respostas de um utilizador */
+function deleteResponsesByUser(userId) {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM responses WHERE user_id = ?`, [userId], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+/** Apaga a linha do utilizador da tabela users */
+function deleteUser(userId) {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM users WHERE user_id = ?`, [userId], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+/** Soft opt-out: marca como opted_out e remove respostas (sem apagar o registo do utilizador) */
+function softOptOutUser(userId) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `UPDATE users
+         SET status = 'opted_out',
+             consent = 0,
+             updated_at = ?
+       WHERE user_id = ?`,
+            [ts, userId],
+            function (err) {
+                if (err) reject(err);
+                else resolve();
+            }
+        );
+    });
+}
+
+/** Apaga tudo do utilizador (responses + users) de forma atómica */
+function deleteUserCascade(userId) {
+    return new Promise((resolve, reject) => {
+        db.serialize(() => {
+            db.run('BEGIN TRANSACTION');
+            db.run(`DELETE FROM responses WHERE user_id = ?`, [userId], function (err) {
+                if (err) {
+                    db.run('ROLLBACK');
+                    return reject(err);
+                }
+                db.run(`DELETE FROM users WHERE user_id = ?`, [userId], function (err2) {
+                    if (err2) {
+                        db.run('ROLLBACK');
+                        return reject(err2);
+                    }
+                    db.run('COMMIT', (err3) => {
+                        if (err3) return reject(err3);
+                        resolve();
+                    });
+                });
+            });
+        });
+    });
+}
+
+
 module.exports = {
     // responses
     saveResponse,
@@ -192,5 +259,9 @@ module.exports = {
     setUserStatus,
     updateUserCountry,
     updateUserMatchPreference,
-    getAllUsers
+    getAllUsers,
+    deleteResponsesByUser,
+    deleteUser,
+    softOptOutUser,
+    deleteUserCascade
 };

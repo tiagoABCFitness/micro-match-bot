@@ -17,8 +17,11 @@ const {
     setUserStatus,
     updateUserCountry,
     getAllUsers,
-    // opcional: se já implementaste no db.js
-    updateUserMatchPreference
+    updateUserMatchPreference,
+    deleteResponsesByUser,
+    deleteUser,
+    softOptOutUser,
+    deleteUserCascade
 } = require('./db');
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
@@ -170,6 +173,21 @@ app.post('/slack/events', async (req, res) => {
 
         try {
             let user = await getUser(userId);
+
+            // ——— Detecta "exit"/"leave" (case-insensitive) e pergunta confirmação
+            const lowered = (userText || '').trim().toLowerCase();
+            if (lowered === 'exit' || lowered === 'leave') {
+                // Se o user existe/registado, pergunta confirmação
+                if (user) {
+                    await askExitConfirmation(userId);
+                } else {
+                    await slackClient.chat.postMessage({
+                        channel: userId,
+                        text: "You're not registered yet. If you want, just say hi or hello to me!"
+                    });
+                }
+                return res.status(200).send();
+            }
 
             // 1) New user -> start consent
             if (!user) {
@@ -545,6 +563,54 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        if (actionId === 'confirm_exit_yes') {
+            // esconde os botões na mensagem original
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Leaving weekly matches…',
+                blocks: replaceActionsWithNote(originalBlocks, '*Leaving confirmed*')
+            });
+
+            try {
+                const { hardDeleted } = await eraseUserData(userId);
+
+                // Mensagem ao utilizador
+                const farewell = hardDeleted
+                    ? "✅ Your data has been deleted. We hope you had fun and met amazing colleagues!"
+                    : "✅ You have been unsubscribed from weekly matches. We hope you had fun and met amazing colleagues!";
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: farewell
+                });
+            } catch (e) {
+                console.error('Error deleting user data:', e);
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: "⚠️ Something went wrong while deleting your data. Please try again later."
+                });
+            }
+
+            return res.sendStatus(200);
+        }
+
+// --- Confirm exit: NO ---
+        if (actionId === 'confirm_exit_no') {
+            await slackClient.chat.update({
+                channel,
+                ts,
+                text: 'Staying in weekly matches.',
+                blocks: replaceActionsWithNote(originalBlocks, '*Stayed in matches*')
+            });
+
+            await slackClient.chat.postMessage({
+                channel: userId,
+                text: "Glad you reconsidered — we love having you here! 🎉"
+            });
+
+            return res.sendStatus(200);
+        }
+
 
         return handleSlackActions(req, res);
     } catch (e) {
@@ -612,5 +678,29 @@ app.get('/debug/match', async (req, res) => {
         res.status(500).send(err.message);
     }
 });
+
+/** Apaga (ou desativa) dados do utilizador, preferindo hard-delete */
+async function eraseUserData(userId) {
+    // 1) tenta hard-delete total (transação)
+    try {
+        await deleteUserCascade(userId);
+        return { hardDeleted: true };
+    } catch (e) {
+        console.warn('deleteUserCascade failed, falling back to softer path:', e.message);
+    }
+
+    // 2) fallback: tentar apagar respostas e o próprio user separadamente
+    try { await deleteResponsesByUser(userId); } catch (_) {}
+    try {
+        await deleteUser(userId);
+        return { hardDeleted: true };
+    } catch (e) {
+        console.warn('deleteUser failed, will soft opt-out:', e.message);
+    }
+
+    // 3) soft delete por fim (mantém a linha em users mas fora do sistema)
+    try { await softOptOutUser(userId); } catch (_) {}
+    return { hardDeleted: false };
+}
 
 module.exports = app;
