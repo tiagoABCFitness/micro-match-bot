@@ -271,7 +271,7 @@ app.post('/slack/events', async (req, res) => {
                             type: 'actions',
                             elements: [
                                 { type: 'button', text: { type: 'plain_text', text: 'Confirm' }, style: 'primary', action_id: 'confirm_interests' },
-                                { type: 'button', text: { type: 'plain_text', text: 'Give more details' }, action_id: 'refine_interests' }
+                                { type: 'button', text: { type: 'plain_text', text: 'I want to change them' }, action_id: 'refine_interests' }
                             ]
                         }
                     ]
@@ -496,7 +496,8 @@ app.post('/slack/actions', async (req, res) => {
 
             await slackClient.chat.postMessage({
                 channel,
-                text: "Great — we’ll prioritise creating a 1:1 room when other colleagues also chose 1:1. If that’s not possible, you’ll be added to a group so you don’t miss out."
+                text: "Great — we’ll prioritise creating a 1:1 room when other colleagues also chose 1:1. If that’s not possible, you’ll be added to a group so " +
+                    "you don’t miss out.\n\n See you there on Friday! If you change your interests, just let me know."
             });
 
             return res.sendStatus(200);
@@ -516,7 +517,7 @@ app.post('/slack/actions', async (req, res) => {
 
             await slackClient.chat.postMessage({
                 channel,
-                text: "Got it — we’ll aim to place you into a group conversation."
+                text: "Got it — we’ll aim to place you into a group conversation. See you there on Friday!\n\n If you change your interests, just let me know."
             });
 
             return res.sendStatus(200);
