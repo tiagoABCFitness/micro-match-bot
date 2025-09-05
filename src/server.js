@@ -703,4 +703,37 @@ async function eraseUserData(userId) {
     return { hardDeleted: false };
 }
 
+/** Envia prompt de confirmação para sair */
+async function askExitConfirmation(userId) {
+    const blocks = [
+        {
+            type: 'section',
+            text: { type: 'mrkdwn',
+                text: "*Do you want to leave weekly matches?*\nIf you confirm, your data will be deleted."
+            }
+        },
+        {
+            type: 'actions',
+            elements: [
+                { type: 'button', text: { type: 'plain_text', text: 'Yes, leave & delete' }, style: 'danger', action_id: 'confirm_exit_yes' },
+                { type: 'button', text: { type: 'plain_text', text: "No, I'll stay" }, action_id: 'confirm_exit_no' }
+            ]
+        }
+    ];
+    await slackClient.chat.postMessage({
+        channel: userId,
+        text: 'Confirm leaving weekly matches?',
+        blocks
+    });
+}
+
+/** Nota utilitária para substituir botões por texto informativo */
+function replaceActionsWithNote(blocks, note) {
+    const safe = Array.isArray(blocks) ? blocks : [];
+    return safe.map(b => b.type === 'actions'
+        ? { type: 'context', elements: [{ type: 'mrkdwn', text: note }] }
+        : b
+    );
+}
+
 module.exports = app;
