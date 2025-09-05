@@ -144,4 +144,35 @@ async function canonicalizeTopics(topics) {
     return mapping;
 }
 
-module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions, canonicalizeTopics };
+/** Gera 3 ice breakers curtos em inglês sobre um tópico */
+async function generateIceBreakers(topic, count = 3) {
+    const client = await getClient();
+
+    const prompt = [
+        `Task: create ${count} ice breaker questions about the topic "${topic}".`,
+        `Guidelines:`,
+        `- Respond ONLY with valid JSON: {"questions": string[]}`,
+        `- Each question in English, max 15 words.`,
+        `- Make them casual, fun, good for group conversation.`,
+        `- No numbering, no explanations, just the array.`
+    ].join('\n');
+
+    const resp = await client.chat.completions.create({
+        model: process.env.AZURE_OPENAI_DEPLOYMENT,
+        temperature: 0.7,
+        max_tokens: 150,
+        messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `topic: ${topic}` },
+            { role: 'user', content: 'Return JSON only.' }
+        ],
+    });
+
+    const raw = resp.choices?.[0]?.message?.content || '';
+    const json = safeParseJSON(raw);
+    const questions = Array.isArray(json?.questions) ? json.questions : [];
+
+    return questions.slice(0, count);
+}
+
+module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions, canonicalizeTopics, generateIceBreakers };

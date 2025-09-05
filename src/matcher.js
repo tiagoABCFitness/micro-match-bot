@@ -35,14 +35,36 @@ async function ensureChannel(name, isPrivate = true) {
 
 async function inviteAndWelcome(channelId, users, topic, mode) {
     if (!users?.length) return;
-    await slackClient.conversations.invite({ channel: channelId, users: users.join(',') });
+
+    try {
+        await slackClient.conversations.invite({ channel: channelId, users: users.join(',') });
+    } catch (err) {
+        // Ignora erros como already_in_channel
+        const code = err?.data?.error;
+        if (!['already_in_channel', 'cant_invite_self'].includes(code)) throw err;
+    }
 
     const isPair = users.length === 2 && mode === '1:1';
-    const opener = isPair
-        ? `You’ve been paired 1:1 on *${topic}* 👋\nTry this: *What’s one underrated thing about ${topic}?*`
-        : `You’ve been matched on *${topic}* 🎉 (group of ${users.length})\nStarter: *What’s something new you learned about ${topic} recently?*`;
 
-    await slackClient.chat.postMessage({ channel: channelId, text: opener });
+    // Gera ice breakers via IA
+    let iceBreakers = [];
+    try {
+        iceBreakers = await ai.generateIceBreakers(topic, 3);
+    } catch (err) {
+        console.warn('AI icebreaker generation failed:', err.message);
+    }
+
+    const base = isPair
+        ? `You’ve been paired 1:1 on *${topic}* 👋`
+        : `You’ve been matched on *${topic}* 🎉 (group of ${users.length})`;
+
+    const questions = iceBreakers.length
+        ? `\nHere are some ice breakers:\n${iceBreakers.map(q => `• ${q}`).join('\n')}`
+        : `\nStarter: *What’s something new you learned about ${topic} recently?*`;
+
+    const text = `${base}${questions}`;
+
+    await slackClient.chat.postMessage({ channel: channelId, text });
 }
 
 function splitPairs(userIds) {
