@@ -23,16 +23,14 @@ async function sendConsentMessage(userId, { revisit = false } = {}) {
     const userName = await getUserName(userId);
 
     const headline = revisit
-        ? `👋 Welcome back, *${userName}*!`
-        : `👋 Hello *${userName}*!`;
+        ? `👋 Welcome back, *${userName}*`
+        : `👋 Hi *${userName}*, I’m Micro-Match!`;
 
-    const body = revisit
-        ? `Glad to see you again. Do you want to try *Micro-Match* now?`
-        : `Welcome to *Micro-Match Bot*. This bot helps you meet colleagues with shared interests.\n\nDo you want to join this experience?`;
+    const body = `\nTo get started, I need your consent to record your answers for matchmaking only. Data is stored securely and never shared. Is that okay? ?`;
 
     const message = {
         channel: userId,
-        text: `Hello ${userName} 👋 Do you want to participate in Micro-Match${revisit ? ' now' : ' this week'}?`,
+        text: `Hi ${userName} 👋 Do you want to participate in Micro-Match${revisit ? ' now' : ' this week'}?`,
         blocks: [
             {
                 type: 'section',
@@ -43,14 +41,14 @@ async function sendConsentMessage(userId, { revisit = false } = {}) {
                 elements: [
                     {
                         type: 'button',
-                        text: { type: 'plain_text', text: 'Yes 🚀' },
+                        text: { type: 'plain_text', text: 'Yes, continue. 🚀' },
                         style: 'primary',
                         value: 'consent_yes',
                         action_id: 'consent_yes'
                     },
                     {
                         type: 'button',
-                        text: { type: 'plain_text', text: 'No ❌' },
+                        text: { type: 'plain_text', text: 'No, thanks. ❌' },
                         style: 'danger',
                         value: 'consent_no',
                         action_id: 'consent_no'
@@ -92,12 +90,12 @@ async function handleSlackActions(req, res) {
                 blocks: [
                     {
                         type: 'section',
-                        text: { type: 'mrkdwn', text: `✅ Thanks, *${name}*! Your choice was recorded.` }
+                        text: { type: 'mrkdwn', text: `✅ Thanks, *${name}*! Your consent was recorded.` }
                     },
                     {
                         type: 'context',
                         elements: [
-                            { type: 'mrkdwn', text: '_You can change this later by messaging me again._' }
+                            { type: 'mrkdwn', text: 'You can clear your data anytime by typing exit or leave.' }
                         ]
                     }
                 ]
@@ -106,7 +104,7 @@ async function handleSlackActions(req, res) {
             // 3) Envia a próxima mensagem do fluxo
             await slackClient.chat.postMessage({
                 channel: userId,
-                text: `🚀 Great, ${name}! In which country do you live?`
+                text: `🚀 Great, ${name}! First things first, where do you currently live (Country)?`
             });
         }
 
@@ -121,12 +119,12 @@ async function handleSlackActions(req, res) {
                 blocks: [
                     {
                         type: 'section',
-                        text: { type: 'mrkdwn', text: `❌ No worries, *${name}*. Choice recorded.` }
+                        text: { type: 'mrkdwn', text: `❌ No worries, *${name}*.` }
                     },
                     {
                         type: 'context',
                         elements: [
-                            { type: 'mrkdwn', text: '_If you change your mind, just send me a message._' }
+                            { type: 'mrkdwn', text: 'If you change your mind, just send me a hi!' }
                         ]
                     }
                 ]

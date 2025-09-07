@@ -58,26 +58,10 @@ function bullets(list) {
     return list.map(i => `• ${i}`).join('\n');
 }
 
-function isoWeekStart(date = new Date()) {
-    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-    const day = d.getUTCDay() || 7; // segunda=1
-    if (day !== 1) d.setUTCDate(d.getUTCDate() - (day - 1));
-    return d.toISOString().slice(0, 10);
-}
 function prevIsoWeekStart(from = new Date()) {
     const d = new Date(from);
     d.setUTCDate(d.getUTCDate() - 7);
     return isoWeekStart(d);
-}
-
-/** Replace any actions block with a context note (hides buttons after click) */
-function replaceActionsWithNote(blocks, note) {
-    const safe = Array.isArray(blocks) ? blocks : [];
-    return safe.map(b =>
-        b.type === 'actions'
-            ? { type: 'context', elements: [{ type: 'mrkdwn', text: note }] }
-            : b
-    );
 }
 
 /** Random sample up to n unique items */
@@ -131,7 +115,7 @@ function suggestTopicsButton() {
     return {
         type: 'actions',
         elements: [
-            { type: 'button', text: { type: 'plain_text', text: 'Show me topic examples' }, action_id: 'suggest_topics' }
+            { type: 'button', text: { type: 'plain_text', text: 'Can you please give me examples?' }, action_id: 'suggest_topics' }
         ]
     };
 }
@@ -140,9 +124,9 @@ function suggestTopicsButton() {
 async function askMatchPreference(userId) {
     await slackClient.chat.postMessage({
         channel: userId,
-        text: 'Before we match: do you prefer 1:1 or a group conversation?',
+        text: 'Final question! If we find multiple matches for you, would you prefer a 1:1 connection or a group?',
         blocks: [
-            { type: 'section', text: { type: 'mrkdwn', text: '*Before we match:* do you prefer a 1:1 or a group conversation?' } },
+            { type: 'section', text: { type: 'mrkdwn', text: '*Final question! If we find multiple matches for you, would you prefer a 1:1 connection or a group?' } },
             {
                 type: 'actions',
                 elements: [
@@ -275,9 +259,9 @@ app.post('/slack/events', async (req, res) => {
 
                 const funFact = await countryFunFact(country).catch(() => null);
 
-                const baseText = `Great — noted ${country}.`;
+                const baseText = `I’ve heard great things about ${country}.`;
                 const factText = funFact ? `\nDid you know: ${funFact}` : '';
-                const followUp = `\nNow, tell me a bit about yourself — what topics would you like to discuss here, or what would you like to learn?`;
+                const followUp = `\nI have another quick question: Can you tell me a bit about yourself and which topics you would enjoy chatting about with colleagues? What are you curious to learn more about?`;
                 const text = `${baseText}${factText}${followUp}`;
 
                 await slackClient.chat.postMessage({
@@ -285,7 +269,7 @@ app.post('/slack/events', async (req, res) => {
                     text,
                     blocks: [
                         { type: 'section', text: { type: 'mrkdwn', text: baseText + (funFact ? `\n*Fun fact:* ${funFact}` : '') } },
-                        { type: 'section', text: { type: 'mrkdwn', text: 'Now, tell me a bit about yourself — what topics would you like to discuss here, or what would you like to learn?' } },
+                        { type: 'section', text: { type: 'mrkdwn', text: followUp } },
                         { type: 'context', elements: [{ type: 'mrkdwn', text: '_e.g., running, photography, programming, nutrition, English, investing…_' }] },
                         suggestTopicsButton()
                     ]
@@ -413,7 +397,7 @@ app.post('/slack/events', async (req, res) => {
                     pendingInterests.set(userId, interests);
                     await setUserStatus(userId, 'awaiting_interests_freeform');
 
-                    const intro = analysis.reply || 'Got it. Here is what I caught:';
+                    const intro = analysis.reply || 'Got it! Here’s what I captured:';
                     const list = bullets(interests);
 
                     await slackClient.chat.postMessage({
@@ -421,12 +405,12 @@ app.post('/slack/events', async (req, res) => {
                         text: `${intro}\n\nProposed interests:\n${list}`,
                         blocks: [
                             { type: 'section', text: { type: 'mrkdwn', text: intro } },
-                            { type: 'section', text: { type: 'mrkdwn', text: `*Proposed interests:*\n${list}` } },
+                            { type: 'section', text: { type: 'mrkdwn', text: `*Got it! Here’s what I captured:*\n${list}\nIs that right?` } },
                             {
                                 type: 'actions',
                                 elements: [
-                                    { type: 'button', text: { type: 'plain_text', text: 'Confirm' }, style: 'primary', action_id: 'confirm_interests' },
-                                    { type: 'button', text: { type: 'plain_text', text: 'Give more details' }, action_id: 'refine_interests' }
+                                    { type: 'button', text: { type: 'plain_text', text: 'Yes, thanks!' }, style: 'primary', action_id: 'confirm_interests' },
+                                    { type: 'button', text: { type: 'plain_text', text: 'No, please redo my answer.' }, action_id: 'refine_interests' }
                                 ]
                             }
                         ]
@@ -509,7 +493,7 @@ app.post('/slack/actions', async (req, res) => {
             const suggestions = await collectCommunityTopics(userId, 5);
             let text;
             if (suggestions.length > 0) {
-                text = `Here are a few topics other colleagues are into:\n${bullets(suggestions)}\n\nIf you'd like to use any of these, just tell me.`;
+                text = `Sure! Some popular topics include:\n${bullets(suggestions)}\n\nFeel free to type in your answer when you’re ready.`;
             } else {
                 const user = await getUser(userId);
                 const country = user?.country || user?.Country || user?.location || 'your country';
@@ -523,7 +507,7 @@ app.post('/slack/actions', async (req, res) => {
                         `${country} football`, `${country} landmarks`, `${country} cinema`
                     ].map(s => s.toLowerCase()), 5);
                 }
-                text = `I don't have topics from other colleagues yet. Since you're in ${country}, here are a few cultural ideas you could discuss:\n${bullets(cultural)}\n\nIf you'd like to use any of these, just tell me.`;
+                text = `Sure! Based on the most popular activities in ${country}, I’d suggest:\n${bullets(cultural)}\n\nFeel free to type in your answer when you’re ready.`;
             }
 
             await slackClient.chat.postMessage({ channel, text });
@@ -575,7 +559,7 @@ app.post('/slack/actions', async (req, res) => {
 
             await slackClient.chat.postMessage({
                 channel,
-                text: 'Great — add a bit more detail about what you enjoy or want to learn, and I will propose an updated list.'
+                text: 'Sure thing, please type your new response and I’ll make the edits.'
             });
 
             return res.sendStatus(200);
@@ -595,7 +579,7 @@ app.post('/slack/actions', async (req, res) => {
 
             await slackClient.chat.postMessage({
                 channel,
-                text: "Great — we’ll prioritise creating a 1:1 room when other colleagues also chose 1:1. If that’s not possible, you’ll be added to a group so " +
+                text: "Awesome 🙌 We’ll prioritise creating a 1:1 room when other colleagues also chose 1:1. If that’s not possible, you’ll be added to a group so " +
                     "you don’t miss out.\n\n See you there on Thursday! If you change your interests, just let me know."
             });
 
@@ -616,7 +600,7 @@ app.post('/slack/actions', async (req, res) => {
 
             await slackClient.chat.postMessage({
                 channel,
-                text: "Got it — we’ll aim to place you into a group conversation. See you there on Thursday!\n\n If you change your interests, just let me know."
+                text: "Awesome 🙌 We’ll aim to place you into a group conversation. See you there on Thursday!\n\n If you change your interests, just let me know. \nYou can opt out anytime by typing “leave”. "
             });
 
             return res.sendStatus(200);
