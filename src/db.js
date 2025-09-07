@@ -7,7 +7,7 @@ const dbPath = path.join(__dirname, '..', 'data', 'responses.db');
 const db = new sqlite3.Database(dbPath);
 
 db.serialize(() => {
-    // tables
+    // -------- tables --------
     db.run(`
         CREATE TABLE IF NOT EXISTS responses (
                                                  user_id   TEXT PRIMARY KEY,
@@ -28,6 +28,28 @@ db.serialize(() => {
                                              updated_at TEXT
         )
     `);
+
+    // rooms used for matches (to later archive)
+    db.run(`
+    CREATE TABLE IF NOT EXISTS match_rooms (
+      channel_id TEXT PRIMARY KEY,
+      created_at TEXT,
+      archived   INTEGER DEFAULT 0
+    )
+  `);
+
+    // weekly check-ins
+    db.run(`
+    CREATE TABLE IF NOT EXISTS checkins (
+      user_id          TEXT,
+      week             TEXT,             -- e.g., 2025-09-02
+      connected        INTEGER,          -- 0/1
+      will_participate INTEGER,          -- 0/1
+      created_at       TEXT,
+      updated_at       TEXT,
+      PRIMARY KEY (user_id, week)
+    )
+  `);
 });
 
 // -------- responses --------
@@ -41,10 +63,7 @@ function saveResponse(userId, topics) {
                  ON CONFLICT(user_id)
        DO UPDATE SET topics=excluded.topics, timestamp=excluded.timestamp`,
             [userId, csv, ts],
-            function (err) {
-                if (err) reject(err);
-                else resolve();
-            }
+            function (err) { if (err) reject(err); else resolve(); }
         );
     });
 }
@@ -58,11 +77,7 @@ function getAllResponses() {
                     .split(',')
                     .map(t => t.trim())
                     .filter(Boolean);
-                return {
-                    userId: r.user_id,
-                    topics: list,
-                    timestamp: r.timestamp
-                };
+                return { userId: r.user_id, topics: list, timestamp: r.timestamp };
             });
             resolve(mapped);
         });
@@ -101,10 +116,7 @@ function saveUser(userId, name, consent, status) {
                                status=excluded.status,
                                updated_at=excluded.updated_at`,
             [userId, name, consent ? 1 : 0, status, ts, ts],
-            function (err) {
-                if (err) reject(err);
-                else resolve();
-            }
+            function (err) { if (err) reject(err); else resolve(); }
         );
     });
 }
@@ -181,8 +193,7 @@ function getAllUsers() {
 }
 
 // -------- deletes / opt-out --------
-
-/** Apaga todas as respostas de um utilizador */
+/** Delete all responses for a user */
 function deleteResponsesByUser(userId) {
     return new Promise((resolve, reject) => {
         db.run(`DELETE FROM responses WHERE user_id = ?`, [userId], function (err) {
@@ -192,7 +203,7 @@ function deleteResponsesByUser(userId) {
     });
 }
 
-/** Apaga a linha do utilizador da tabela users */
+/** Delete user row from users */
 function deleteUser(userId) {
     return new Promise((resolve, reject) => {
         db.run(`DELETE FROM users WHERE user_id = ?`, [userId], function (err) {
@@ -202,16 +213,16 @@ function deleteUser(userId) {
     });
 }
 
-/** Soft opt-out: marca como opted_out e remove respostas (sem apagar o registo do utilizador) */
+/** Soft opt-out: marks as opted_out and removes consent (keeps user row) */
 function softOptOutUser(userId) {
     return new Promise((resolve, reject) => {
         const ts = new Date().toISOString();
         db.run(
             `UPDATE users
-         SET status = 'opted_out',
-             consent = 0,
-             updated_at = ?
-       WHERE user_id = ?`,
+             SET status = 'opted_out',
+                 consent = 0,
+                 updated_at = ?
+             WHERE user_id = ?`,
             [ts, userId],
             function (err) {
                 if (err) reject(err);
@@ -221,7 +232,7 @@ function softOptOutUser(userId) {
     });
 }
 
-/** Apaga tudo do utilizador (responses + users) de forma atómica */
+/** Atomic delete of user (responses + user row) */
 function deleteUserCascade(userId) {
     return new Promise((resolve, reject) => {
         db.serialize(() => {
@@ -246,6 +257,69 @@ function deleteUserCascade(userId) {
     });
 }
 
+// -------- match rooms --------
+function upsertMatchRoom(channelId) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `INSERT INTO match_rooms (channel_id, created_at, archived)
+       VALUES (?, ?, 0)
+       ON CONFLICT(channel_id)
+       DO UPDATE SET archived = 0`,
+            [channelId, ts],
+            function (err) { if (err) reject(err); else resolve(); }
+        );
+    });
+}
+
+function markRoomArchived(channelId) {
+    return new Promise((resolve, reject) => {
+        db.run(
+            `UPDATE match_rooms SET archived = 1 WHERE channel_id = ?`,
+            [channelId],
+            function (err) { if (err) reject(err); else resolve(); }
+        );
+    });
+}
+
+function getActiveRooms() {
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT channel_id FROM match_rooms WHERE archived = 0`,
+            [],
+            (err, rows) => (err ? reject(err) : resolve((rows || []).map(r => r.channel_id)))
+        );
+    });
+}
+
+// -------- weekly check-ins --------
+function upsertCheckinConnected(userId, week, connected) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `INSERT INTO checkins (user_id, week, connected, will_participate, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?)
+       ON CONFLICT(user_id, week)
+       DO UPDATE SET connected = excluded.connected, updated_at = excluded.updated_at`,
+            [userId, week, connected ? 1 : 0, ts, ts],
+            function (err) { if (err) reject(err); else resolve(); }
+        );
+    });
+}
+
+function upsertCheckinParticipate(userId, week, willParticipate) {
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.run(
+            `INSERT INTO checkins (user_id, week, connected, will_participate, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?)
+       ON CONFLICT(user_id, week)
+       DO UPDATE SET will_participate = excluded.will_participate, updated_at = excluded.updated_at`,
+            [userId, week, willParticipate ? 1 : 0, ts, ts],
+            function (err) { if (err) reject(err); else resolve(); }
+        );
+    });
+}
 
 module.exports = {
     // responses
@@ -263,5 +337,12 @@ module.exports = {
     deleteResponsesByUser,
     deleteUser,
     softOptOutUser,
-    deleteUserCascade
+    deleteUserCascade,
+    // rooms
+    upsertMatchRoom,
+    markRoomArchived,
+    getActiveRooms,
+    // check-ins
+    upsertCheckinConnected,
+    upsertCheckinParticipate
 };

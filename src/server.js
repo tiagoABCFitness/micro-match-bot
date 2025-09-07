@@ -21,7 +21,12 @@ const {
     deleteResponsesByUser,
     deleteUser,
     softOptOutUser,
-    deleteUserCascade
+    deleteUserCascade,
+    upsertMatchRoom,
+    markRoomArchived,
+    getActiveRooms,
+    upsertCheckinConnected,
+    upsertCheckinParticipate
 } = require('./db');
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
@@ -151,6 +156,34 @@ async function saveMatchPref(userId, pref) {
     }
     matchPrefMemory.set(userId, pref);
 }
+
+// chave simples da “semana” (usa a data do run)
+function weekKey(d = new Date()) {
+    return d.toISOString().slice(0, 10); // ex.: 2025-09-02
+}
+
+// DM check-in (abre IM e envia pergunta Yes/No)
+async function askWeeklyCheckin(slack, userId, userName) {
+    const open = await slack.conversations.open({ users: userId });
+    const imChannel = open?.channel?.id || userId;
+    const greeting = userName ? `Hey ${userName},` : 'Hey there,';
+
+    await slack.chat.postMessage({
+        channel: imChannel,
+        text: `${greeting} time for this week's check-in! Did you have a chance to connect last week?`,
+        blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: `${greeting} time for this week's check-in! Did you have a chance to connect last week?` } },
+            {
+                type: 'actions',
+                elements: [
+                    { type: 'button', text: { type: 'plain_text', text: 'Yes' }, style: 'primary', action_id: 'checkin_connected_yes' },
+                    { type: 'button', text: { type: 'plain_text', text: 'No' }, action_id: 'checkin_connected_no' }
+                ]
+            }
+        ]
+    });
+}
+
 
 // Slack Events use JSON; Slack Interactivity uses x-www-form-urlencoded
 app.use(express.json());
@@ -543,7 +576,7 @@ app.post('/slack/actions', async (req, res) => {
             await slackClient.chat.postMessage({
                 channel,
                 text: "Great — we’ll prioritise creating a 1:1 room when other colleagues also chose 1:1. If that’s not possible, you’ll be added to a group so " +
-                    "you don’t miss out.\n\n See you there on Friday! If you change your interests, just let me know."
+                    "you don’t miss out.\n\n See you there on Thursday! If you change your interests, just let me know."
             });
 
             return res.sendStatus(200);
@@ -563,7 +596,7 @@ app.post('/slack/actions', async (req, res) => {
 
             await slackClient.chat.postMessage({
                 channel,
-                text: "Got it — we’ll aim to place you into a group conversation. See you there on Friday!\n\n If you change your interests, just let me know."
+                text: "Got it — we’ll aim to place you into a group conversation. See you there on Thursday!\n\n If you change your interests, just let me know."
             });
 
             return res.sendStatus(200);
@@ -639,6 +672,122 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        // ... já tens parsing do payload / vars channel, ts, originalBlocks, userId, etc.
+
+// 1) Check-in: connected? (Yes/No)
+        if (actionId === 'checkin_connected_yes' || actionId === 'checkin_connected_no') {
+            const yes = actionId === 'checkin_connected_yes';
+            const week = weekKey();
+
+            // Esconde botões
+            await slackClient.chat.update({
+                channel, ts,
+                text: 'Check-in saved.',
+                blocks: replaceActionsWithNote(originalBlocks, yes ? '*Check-in: Yes*' : '*Check-in: No*')
+            });
+
+            // Guarda resposta
+            try { await upsertCheckinConnected(userId, week, yes); } catch (e) { console.error('save checkin connected failed:', e); }
+
+            // Pergunta participação para a próxima ronda
+            await slackClient.chat.postMessage({
+                channel,
+                text: "Got it! I'm preparing a new round of matches. Would you like to participate?",
+                blocks: [
+                    { type: 'section', text: { type: 'mrkdwn', text: "Got it! I'm preparing a new round of matches. Would you like to participate?" } },
+                    {
+                        type: 'actions',
+                        elements: [
+                            { type: 'button', text: { type: 'plain_text', text: 'Yes, count me in' }, style: 'primary', action_id: 'participate_yes' },
+                            { type: 'button', text: { type: 'plain_text', text: 'No, not this week' }, action_id: 'participate_no' }
+                        ]
+                    }
+                ]
+            });
+
+            return res.sendStatus(200);
+        }
+
+// 2) Participação: sim / não
+        if (actionId === 'participate_yes' || actionId === 'participate_no') {
+            const yes = actionId === 'participate_yes';
+            const week = weekKey();
+
+            await slackClient.chat.update({
+                channel, ts,
+                text: 'Preference saved.',
+                blocks: replaceActionsWithNote(originalBlocks, yes ? '*Participation: Yes*' : '*Participation: No*')
+            });
+
+            try { await upsertCheckinParticipate(userId, week, yes); } catch (e) { console.error('save checkin participate failed:', e); }
+
+            if (!yes) {
+                await slackClient.chat.postMessage({
+                    channel,
+                    text: `No problem! I will check again next week. You can opt to quit the cycle by typing "exit" or "leave".`
+                });
+                // podes marcar status "paused" se quiseres:
+                try { await setUserStatus(userId, 'paused'); } catch {}
+                return res.sendStatus(200);
+            }
+
+            // Se sim: oferecer manter ou mudar preferências
+            await slackClient.chat.postMessage({
+                channel,
+                text: `Great — you'll be included in the next round of matches. Matches happen on Thursday and I'll collect responses until then.\nWould you like to change your preferences?`,
+                blocks: [
+                    { type: 'section', text: { type: 'mrkdwn', text: `Great — you'll be included in the next round of matches. Matches happen on *Thursday* and I'll collect responses until then.\nWould you like to change your preferences (interests & match type)?` } },
+                    {
+                        type: 'actions',
+                        elements: [
+                            { type: 'button', text: { type: 'plain_text', text: 'Keep current settings' }, style: 'primary', action_id: 'keep_prefs' },
+                            { type: 'button', text: { type: 'plain_text', text: 'Change preferences' }, action_id: 'change_prefs' }
+                        ]
+                    }
+                ]
+            });
+
+            return res.sendStatus(200);
+        }
+
+// 3) Manter / Mudar preferências
+        if (actionId === 'keep_prefs') {
+            await slackClient.chat.update({
+                channel, ts,
+                text: 'Preferences kept.',
+                blocks: replaceActionsWithNote(originalBlocks, '*Preferences: Keep current*')
+            });
+
+            try { await setUserStatus(userId, 'active'); } catch {}
+            await slackClient.chat.postMessage({
+                channel,
+                text: "Perfect — you're all set for the next round. Ping me anytime if you want to update your interests."
+            });
+            return res.sendStatus(200);
+        }
+
+        if (actionId === 'change_prefs') {
+            await slackClient.chat.update({
+                channel, ts,
+                text: 'Let’s update your preferences…',
+                blocks: replaceActionsWithNote(originalBlocks, '*Preferences: Change*')
+            });
+
+            try { await setUserStatus(userId, 'awaiting_interests_freeform'); } catch {}
+
+            await slackClient.chat.postMessage({
+                channel,
+                text: "Tell me a bit about what you'd like to discuss or learn, and I'll propose an updated list.",
+                blocks: [
+                    { type: 'section', text: { type: 'mrkdwn', text: "Tell me a bit about what you'd like to discuss or learn, and I'll propose an updated list." } },
+                    suggestTopicsButton()
+                ]
+            });
+
+            return res.sendStatus(200);
+        }
+
+
 
         return handleSlackActions(req, res);
     } catch (e) {
@@ -682,10 +831,10 @@ app.get('/debug/match', async (req, res) => {
         const token = req.query.token;
         const today = new Date().getUTCDay(); // 0=Domingo ... 5=Sexta
 
-        // Se tem token (vem do Scheduler) → só corre às sextas
+        // Se tem token (vem do Scheduler) → só corre às quintas
         if (token) {
-            if (today !== 5) {
-                return res.json({ skipped: true, reason: 'Not Friday (UTC)' });
+            if (today !== 4) {
+                return res.json({ skipped: true, reason: 'Not thursday' });
             }
         }
 
@@ -704,6 +853,88 @@ app.get('/debug/match', async (req, res) => {
     } catch (err) {
         console.error('Error running matcher:', err);
         res.status(500).send(err.message);
+    }
+});
+
+// Arquiva salas + dispara DMs de check-in
+app.post('/debug/weekly-checkin', async (req, res) => {
+    try {
+        const token = req.query.token;
+        const today = new Date().getUTCDay(); // 0=Domingo ... 5=Sexta
+
+        // Se tem token (vem do Scheduler) → só corre às tercas
+        if (token) {
+            if (today !== 2) {
+                return res.json({ skipped: true, reason: 'Not Tuesday' });
+            }
+        }
+
+        const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+        const bodyChannels = Array.isArray(req.body?.channel_ids) ? req.body.channel_ids : null;
+
+        // se vierem canais no payload, regista-os (e usa-os)
+        if (bodyChannels) {
+            for (const ch of bodyChannels) { if (ch) await upsertMatchRoom(ch); }
+        }
+
+        const channelIds = bodyChannels || await getActiveRooms();
+        const week = weekKey();
+        let archived = 0, dms = 0;
+
+        // id do bot para filtrar se necessário
+        let botUserId = null;
+        try { const auth = await slack.auth.test(); botUserId = auth?.user_id || null; } catch {}
+
+        for (const channel of channelIds) {
+            if (!channel) continue;
+
+            // Mensagem de despedida
+            try {
+                await slack.chat.postMessage({
+                    channel,
+                    text: "Hope you had fun and made some new connections. This channel will be archived now. See you again soon!"
+                });
+            } catch (e) {
+                console.warn('post farewell failed for', channel, e.data?.error || e.message);
+            }
+
+            // Recolher participantes e DM check-in
+            let members = [];
+            try {
+                const r = await slack.conversations.members({ channel });
+                members = Array.isArray(r?.members) ? r.members : [];
+            } catch (e) {
+                console.warn('members fetch failed for', channel, e.data?.error || e.message);
+            }
+
+            for (const uid of members) {
+                if (!uid) continue;
+                if (botUserId && uid === botUserId) continue; // ignora o bot
+                try {
+                    const u = await getUser(uid); // pode não existir no teu DB, é ok
+                    await askWeeklyCheckin(slack, uid, u?.name);
+                    dms++;
+                } catch (e) {
+                    console.warn('check-in DM failed for', uid, e.message);
+                }
+            }
+
+            // Arquivar canal (só funciona para canais, não DMs/MPIM)
+            try {
+                await slack.conversations.archive({ channel });
+                await markRoomArchived(channel);
+                archived++;
+            } catch (e) {
+                console.warn('archive failed for', channel, e.data?.error || e.message);
+                // se não der para arquivar (ex.: DM), marca como arquivado mesmo assim?
+                // await markRoomArchived(channel);
+            }
+        }
+
+        res.json({ ok: true, archived, checkinDMs: dms, week });
+    } catch (e) {
+        console.error('/cron/weekly-checkin error:', e);
+        res.status(500).send(e.message);
     }
 });
 
