@@ -183,12 +183,12 @@ function prevWeekKey(from = new Date()) {
 }
 
 // DM check-in (abre IM e envia pergunta Yes/No)
-async function askWeeklyCheckin(slack, userId, userName) {
-    const open = await slack.conversations.open({ users: userId });
+async function askWeeklyCheckin(userId, userName) {
+    const open = await slackClient.conversations.open({ users: userId }).catch(() => null);
     const imChannel = open?.channel?.id || userId;
     const greeting = userName ? `Hey ${userName},` : 'Hey there,';
 
-    await slack.chat.postMessage({
+    await slackClient.chat.postMessage({
         channel: imChannel,
         text: `${greeting} time for this week's check-in! Did you have a chance to connect last week?`,
         blocks: [
@@ -878,41 +878,40 @@ app.get('/debug/match', async (req, res) => {
 });
 
 // Arquiva salas + dispara DMs de check-in
+// Arquiva salas + dispara DMs de check-in
 app.get('/debug/weekly-checkin', async (req, res) => {
     try {
         const token = req.query.token;
-        const today = new Date().getUTCDay(); // 0=Domingo ... 5=Sexta
+        const force = (req.query.force || '').toLowerCase(); // 'this' | 'both' | ''
+        const today = new Date().getUTCDay(); // 0=Sun ... 2=Tue ... 5=Fri
 
         const thisWeekBucket = isoWeekStart(new Date());
         const lastWeekBucket = prevIsoWeekStart(new Date());
 
-        // Se tem token (vem do Scheduler) → só corre às tercas
-        if (token) {
-            if (today !== 2) {
-                return res.json({ skipped: true, reason: 'Not Tuesday' });
-            }
+        // Se tem token (scheduler) → só corre à terça (UTC)
+        if (token && today !== 2) {
+            return res.json({ skipped: true, reason: 'Not Tuesday', today });
         }
 
-        const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+        // canais ativos (criados no matching) — pode passar override no body se quiseres
         const bodyChannels = Array.isArray(req.body?.channel_ids) ? req.body.channel_ids : null;
-        const channelIds = bodyChannels || await getActiveRooms(); // rooms you saved when matching
+        const channelIds = bodyChannels || await getActiveRooms();
 
-        const dmSet = new Set(); // to avoid duplicate DMs
-        const week = weekKey();
-        const lastWeek = prevWeekKey();
+        const dmSet = new Set(); // evitar DMs duplicadas
         let archived = 0, dms = 0;
 
-        // figure out bot user id (to skip)
+        // descobrir o id do bot para não DM o próprio bot
         let botUserId = null;
         try {
             const auth = await slackClient.auth.test();
             botUserId = auth?.user_id || null;
-        } catch {}
+        } catch (_) {}
 
+        // 1) loop pelas salas ainda ativas
         for (const channel of channelIds) {
             if (!channel) continue;
 
-            // 1) farewell message to the room
+            // (1) mensagem de despedida
             try {
                 await slackClient.chat.postMessage({
                     channel,
@@ -922,9 +921,10 @@ app.get('/debug/weekly-checkin', async (req, res) => {
                 console.warn('farewell post failed for', channel, e.data?.error || e.message);
             }
 
-            // 2) determine participants: prefer DB snapshot, fallback to live members
+            // (2) participantes → preferir snapshot do DB se existir, senão Slack API
             let participants = [];
             try {
+                // Nota: se não implementaste esta função, typeof devolve 'undefined' e este bloco é ignorado
                 if (typeof getParticipantsForChannels === 'function') {
                     participants = await getParticipantsForChannels([channel]);
                 }
@@ -941,6 +941,7 @@ app.get('/debug/weekly-checkin', async (req, res) => {
                 }
             }
 
+            // (3) DM check-in aos participantes
             for (const uid of participants || []) {
                 if (!uid) continue;
                 if (botUserId && uid === botUserId) continue;
@@ -948,7 +949,7 @@ app.get('/debug/weekly-checkin', async (req, res) => {
 
                 try {
                     const u = await getUser(uid).catch(() => null);
-                    await askWeeklyCheckin(uid, u?.name);
+                    await askWeeklyCheckin(uid, u?.name); // <- usa slackClient internamente
                     dmSet.add(uid);
                     dms++;
                 } catch (e) {
@@ -956,55 +957,85 @@ app.get('/debug/weekly-checkin', async (req, res) => {
                 }
             }
 
-            // 3) archive channel
+            // (4) arquivar a sala e marcar no DB
             try {
                 await slackClient.conversations.archive({ channel });
                 await markRoomArchived(channel);
                 archived++;
             } catch (e) {
                 console.warn('archive failed for', channel, e.data?.error || e.message);
-                // if you want to mark as archived even when Slack blocks it (e.g., MPIM), uncomment:
+                // se quiseres marcar como arquivado mesmo em erro (ex.: MPIM), descomenta:
                 // await markRoomArchived(channel);
             }
         }
 
-        // (4) opted-in da semana passada que não estiveram em sala
-        try {
-            const optedIn = await getOptedInUsersForWeek(lastWeekBucket);
-            for (const uid of optedIn || []) {
-                if (!uid || dmSet.has(uid)) continue;
-                const u = await getUser(uid).catch(() => null);
-                await askWeeklyCheckin(uid, u?.name);
-                dmSet.add(uid); dms++;
-            }
-        } catch (e) { console.warn('opted-in fetch failed:', e.message); }
+        // 2) buckets a considerar para opted-in e unmatched
+        const buckets = [lastWeekBucket];
+        if (force === 'this' || force === 'both') buckets.push(thisWeekBucket);
 
-        // (5) UNMATCHED da semana passada (sem sala) — garante o teu caso de 1 utilizador
-        try {
-            const unmatchedPrev = await getUnmatchedUsersForWeek(lastWeekBucket);
-            for (const uid of unmatchedPrev || []) {
-                if (!uid || dmSet.has(uid)) continue; // evita duplicar
-                const u = await getUser(uid).catch(() => null);
-                await askWeeklyCheckin(uid, u?.name);
-                dmSet.add(uid);
-                dms++;
-            }
-        }catch (e) { console.warn('unmatchedPrev fetch failed:', e.message); }
+        // (2a) DM para quem disse que queria participar nos buckets escolhidos
+        for (const b of buckets) {
+            try {
+                const optedIn = await getOptedInUsersForWeek(b);
+                for (const uid of optedIn || []) {
+                    if (!uid) continue;
+                    if (dmSet.has(uid)) continue;
+                    if (botUserId && uid === botUserId) continue;
 
+                    const u = await getUser(uid).catch(() => null);
+                    try {
+                        await askWeeklyCheckin(uid, u?.name);
+                        dmSet.add(uid);
+                        dms++;
+                    } catch (e) {
+                        console.warn('opted-in DM failed for', uid, e.message);
+                    }
+                }
+            } catch (e) {
+                console.warn('opted-in fetch failed for', b, e.message);
+            }
+        }
+
+        // (2b) DM para quem ficou UNMATCHED nos buckets escolhidos
+        for (const b of buckets) {
+            try {
+                const unmatchedList = await getUnmatchedUsersForWeek(b);
+                for (const uid of unmatchedList || []) {
+                    if (!uid) continue;
+                    if (dmSet.has(uid)) continue;
+                    if (botUserId && uid === botUserId) continue;
+
+                    const u = await getUser(uid).catch(() => null);
+                    try {
+                        await askWeeklyCheckin(uid, u?.name);
+                        dmSet.add(uid);
+                        dms++;
+                    } catch (e) {
+                        console.warn('unmatched DM failed for', uid, e.message);
+                    }
+                }
+            } catch (e) {
+                console.warn('unmatched fetch failed for', b, e.message);
+            }
+        }
+
+        // resposta
         return res.json({
             ok: true,
             thisWeekBucket,
             lastWeekBucket,
+            bucketsUsed: buckets,
             channelsProcessed: channelIds.length,
             archived,
             checkinDMs: dms,
             uniqueRecipients: dmSet.size
         });
     } catch (e) {
-        console.error('/cron/weekly-checkin error:', e);
+        console.error('/debug/weekly-checkin error:', e);
         return res.status(500).send(e.message);
     }
 });
+
 
 /** Apaga (ou desativa) dados do utilizador, preferindo hard-delete */
 async function eraseUserData(userId) {

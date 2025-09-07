@@ -102,6 +102,16 @@ async function runMatcher() {
     if (!responses || responses.length < 2) {
         const unmatched = Array.isArray(responses) ? responses.map(r => r.userId) : [];
         console.log(`Not enough users to match. Unmatched: ${unmatched.join(', ')}`);
+        // Gravar unmatched no bucket da semana atual
+        try {
+            const weekBucket = isoWeekStart(new Date());
+            if (typeof addUnmatchedUsersForWeek === 'function' && unmatched.length) {
+                await addUnmatchedUsersForWeek(weekBucket, unmatched);
+            }
+        } catch (e) {
+            console.warn('addUnmatchedUsersForWeek (early) failed:', e.message);
+        }
+
         return { created: [], unmatched, notEnough: true };
     }
 
