@@ -75,8 +75,8 @@ async function inviteAndWelcome(channelId, users, topic, mode) {
     }
 
     const base = isPair
-        ? `You’ve been paired 1:1 on *${topic}* 👋`
-        : `You’ve been matched on *${topic}* 🎉 (group of ${users.length})`;
+        ? `YWelcome! Meet your Micro-Match for this week! You both share an interest in *${topic}* 👋`
+        : `Welcome and meet your micro matches from this week! You are all interested in chatting about*${topic}* 🎉`;
 
     const questions = Array.isArray(iceBreakers) && iceBreakers.length
         ? `\nHere are some ice breakers:\n${iceBreakers.map(q => `• ${q}`).join('\n')}`

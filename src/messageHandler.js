@@ -43,7 +43,7 @@ async function sendNoMatchOptions(userId, groupRooms) {
     if (!groupRooms.length) {
         await slackClient.chat.postMessage({
             channel: userId,
-            text: "😔 This time we couldn't match you and there are no group rooms available."
+            text: "😔 I couldn’t find a match for you this round, but no worries! A new round starts next week, and I’d love to try again."
         });
         return;
     }

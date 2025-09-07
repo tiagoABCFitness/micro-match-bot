@@ -174,9 +174,9 @@ async function askWeeklyCheckin(userId, userName) {
 
     await slackClient.chat.postMessage({
         channel: imChannel,
-        text: `${greeting} time for this week's check-in! Did you have a chance to connect last week?`,
+        text: `${greeting}! 👋\nTime for this week's check-in! Did you have a chance to connect last week?`,
         blocks: [
-            { type: 'section', text: { type: 'mrkdwn', text: `${greeting} time for this week's check-in! Did you have a chance to connect last week?` } },
+            { type: 'section', text: { type: 'mrkdwn', text: `${greeting}! 👋\nTime for this week's check-in! Did you have a chance to connect last week?` } },
             {
                 type: 'actions',
                 elements: [
@@ -696,13 +696,13 @@ app.post('/slack/actions', async (req, res) => {
             // Pergunta participação para a próxima ronda
             await slackClient.chat.postMessage({
                 channel,
-                text: "Got it! I'm preparing a new round of matches. Would you like to participate?",
+                text: "Got it! A new round of matches will start next Tuesday. Would you be interested in participating?",
                 blocks: [
-                    { type: 'section', text: { type: 'mrkdwn', text: "Got it! I'm preparing a new round of matches. Would you like to participate?" } },
+                    { type: 'section', text: { type: 'mrkdwn', text: "Got it! A new round of matches will start next Tuesday. Would you be interested in participating?" } },
                     {
                         type: 'actions',
                         elements: [
-                            { type: 'button', text: { type: 'plain_text', text: 'Yes, count me in' }, style: 'primary', action_id: 'participate_yes' },
+                            { type: 'button', text: { type: 'plain_text', text: 'Yes, count me in!' }, style: 'primary', action_id: 'participate_yes' },
                             { type: 'button', text: { type: 'plain_text', text: 'No, not this week' }, action_id: 'participate_no' }
                         ]
                     }
@@ -740,11 +740,12 @@ app.post('/slack/actions', async (req, res) => {
                 channel,
                 text: `Great — you'll be included in the next round of matches. Matches happen on Thursday and I'll collect responses until then.\nWould you like to change your preferences?`,
                 blocks: [
-                    { type: 'section', text: { type: 'mrkdwn', text: `Great — you'll be included in the next round of matches. Matches happen on *Thursday* and I'll collect responses until then.\nWould you like to change your preferences (interests & match type)?` } },
+                    { type: 'section', text: { type: 'mrkdwn', text: `Great! You’ll be included in the next round of matches. Matches will be made on Friday and I’ll be collecting responses all of next week. 
+                        Let me know if you would like to change your preferences` } },
                     {
                         type: 'actions',
                         elements: [
-                            { type: 'button', text: { type: 'plain_text', text: 'Keep current settings' }, style: 'primary', action_id: 'keep_prefs' },
+                            { type: 'button', text: { type: 'plain_text', text: 'Keep current preferences' }, style: 'primary', action_id: 'keep_prefs' },
                             { type: 'button', text: { type: 'plain_text', text: 'Change preferences' }, action_id: 'change_prefs' }
                         ]
                     }
