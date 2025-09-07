@@ -348,9 +348,9 @@ app.post('/slack/events', async (req, res) => {
                     if (interests.length === 0) {
                         await slackClient.chat.postMessage({
                             channel: userId,
-                            text: "I didn’t pick up enough interests to update your list. Could you add a bit more detail?",
+                            text: "If you'd like to change your topics, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match.",
                             blocks: [
-                                { type: 'section', text: { type: 'mrkdwn', text: "I didn’t pick up enough interests to update your list. Could you add a bit more detail?" } },
+                                { type: 'section', text: { type: 'mrkdwn', text: "If you'd like to change your topics, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match." } },
                                 suggestTopicsButton()
                             ]
                         });
