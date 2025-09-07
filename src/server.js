@@ -26,7 +26,8 @@ const {
     markRoomArchived,
     getActiveRooms,
     upsertCheckinConnected,
-    upsertCheckinParticipate
+    upsertCheckinParticipate,
+    getOptedInUsersForWeek
 } = require('./db');
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
@@ -160,6 +161,12 @@ async function saveMatchPref(userId, pref) {
 // chave simples da “semana” (usa a data do run)
 function weekKey(d = new Date()) {
     return d.toISOString().slice(0, 10); // ex.: 2025-09-02
+}
+
+function prevWeekKey(from = new Date()) {
+    const d = new Date(from);
+    d.setUTCDate(d.getUTCDate() - 7);
+    return weekKey(d);
 }
 
 // DM check-in (abre IM e envia pergunta Yes/No)
@@ -872,70 +879,109 @@ app.get('/debug/weekly-checkin', async (req, res) => {
 
         const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
         const bodyChannels = Array.isArray(req.body?.channel_ids) ? req.body.channel_ids : null;
+        const channelIds = bodyChannels || await getActiveRooms(); // rooms you saved when matching
 
-        // se vierem canais no payload, regista-os (e usa-os)
-        if (bodyChannels) {
-            for (const ch of bodyChannels) { if (ch) await upsertMatchRoom(ch); }
-        }
-
-        const channelIds = bodyChannels || await getActiveRooms();
+        const dmSet = new Set(); // to avoid duplicate DMs
         const week = weekKey();
+        const lastWeek = prevWeekKey();
         let archived = 0, dms = 0;
 
-        // id do bot para filtrar se necessário
+        // figure out bot user id (to skip)
         let botUserId = null;
-        try { const auth = await slack.auth.test(); botUserId = auth?.user_id || null; } catch {}
+        try {
+            const auth = await slackClient.auth.test();
+            botUserId = auth?.user_id || null;
+        } catch {}
 
         for (const channel of channelIds) {
             if (!channel) continue;
 
-            // Mensagem de despedida
+            // 1) farewell message to the room
             try {
-                await slack.chat.postMessage({
+                await slackClient.chat.postMessage({
                     channel,
                     text: "Hope you had fun and made some new connections. This channel will be archived now. See you again soon!"
                 });
             } catch (e) {
-                console.warn('post farewell failed for', channel, e.data?.error || e.message);
+                console.warn('farewell post failed for', channel, e.data?.error || e.message);
             }
 
-            // Recolher participantes e DM check-in
-            let members = [];
+            // 2) determine participants: prefer DB snapshot, fallback to live members
+            let participants = [];
             try {
-                const r = await slack.conversations.members({ channel });
-                members = Array.isArray(r?.members) ? r.members : [];
+                if (typeof getParticipantsForChannels === 'function') {
+                    participants = await getParticipantsForChannels([channel]);
+                }
             } catch (e) {
-                console.warn('members fetch failed for', channel, e.data?.error || e.message);
+                console.warn('getParticipantsForChannels failed:', e.message);
             }
 
-            for (const uid of members) {
-                if (!uid) continue;
-                if (botUserId && uid === botUserId) continue; // ignora o bot
+            if (!participants?.length) {
                 try {
-                    const u = await getUser(uid); // pode não existir no teu DB, é ok
-                    await askWeeklyCheckin(slack, uid, u?.name);
+                    const r = await slackClient.conversations.members({ channel });
+                    participants = Array.isArray(r?.members) ? r.members : [];
+                } catch (e) {
+                    console.warn('members fetch failed for', channel, e.data?.error || e.message);
+                }
+            }
+
+            for (const uid of participants || []) {
+                if (!uid) continue;
+                if (botUserId && uid === botUserId) continue;
+                if (dmSet.has(uid)) continue;
+
+                try {
+                    const u = await getUser(uid).catch(() => null);
+                    await askWeeklyCheckin(uid, u?.name);
+                    dmSet.add(uid);
                     dms++;
                 } catch (e) {
                     console.warn('check-in DM failed for', uid, e.message);
                 }
             }
 
-            // Arquivar canal (só funciona para canais, não DMs/MPIM)
+            // 3) archive channel
             try {
-                await slack.conversations.archive({ channel });
+                await slackClient.conversations.archive({ channel });
                 await markRoomArchived(channel);
                 archived++;
             } catch (e) {
                 console.warn('archive failed for', channel, e.data?.error || e.message);
-                // se não der para arquivar (ex.: DM), marca como arquivado mesmo assim?
+                // if you want to mark as archived even when Slack blocks it (e.g., MPIM), uncomment:
                 // await markRoomArchived(channel);
             }
         }
 
-        res.json({ ok: true, archived, checkinDMs: dms, week });
+        // 4) also ping users who opted-in LAST WEEK but never got a room
+        try {
+            const optedIn = await getOptedInUsersForWeek(lastWeek);
+            for (const uid of optedIn || []) {
+                if (!uid || dmSet.has(uid)) continue; // already DM'ed above
+                try {
+                    const u = await getUser(uid).catch(() => null);
+                    await askWeeklyCheckin(uid, u?.name);
+                    dmSet.add(uid);
+                    dms++;
+                } catch (e) {
+                    console.warn('opted-in DM failed for', uid, e.message);
+                }
+            }
+        } catch (e) {
+            console.warn('fetch opted-in users failed:', e.message);
+        }
+
+        return res.json({
+            ok: true,
+            week,
+            lastWeek,
+            channelsProcessed: channelIds.length,
+            archived,
+            checkinDMs: dms,
+            uniqueRecipients: dmSet.size
+        });
     } catch (e) {
         console.error('/cron/weekly-checkin error:', e);
-        res.status(500).send(e.message);
+        return res.status(500).send(e.message);
     }
 });
 

@@ -321,6 +321,19 @@ function upsertCheckinParticipate(userId, week, willParticipate) {
     });
 }
 
+// Quem disse que queria participar numa dada semana
+function getOptedInUsersForWeek(week) {
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT user_id FROM checkins WHERE week = ? AND will_participate = 1`,
+            [week],
+            (err, rows) => (err ? reject(err) : resolve((rows || []).map(r => r.user_id)))
+        );
+    });
+}
+
+module.exports.getOptedInUsersForWeek = getOptedInUsersForWeek;
+
 module.exports = {
     // responses
     saveResponse,
@@ -344,5 +357,6 @@ module.exports = {
     getActiveRooms,
     // check-ins
     upsertCheckinConnected,
-    upsertCheckinParticipate
+    upsertCheckinParticipate,
+    getOptedInUsersForWeek
 };
