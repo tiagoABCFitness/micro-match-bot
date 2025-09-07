@@ -1,11 +1,17 @@
 // src/matcher.js
 require('dotenv').config();
-const { getAllResponses } = require('./db');
 const slackClient = require('./slackClient');
 const ai = require('./ai');
+const { getAllResponses } = require('./db'); // sempre existe
+
+// opcional: só usamos se existirem no db.js
+let upsertMatchRoom, addMatchParticipants;
+try {
+    ({ upsertMatchRoom, addMatchParticipants } = require('./db'));
+} catch { /* ignore */ }
 
 function sanitizeChannelName(name) {
-    return name
+    return String(name || '')
         .toLowerCase()
         .replace(/[^a-z0-9-]/g, '-')
         .replace(/-+/g, '-')
@@ -19,37 +25,43 @@ function todayStamp() {
 
 async function ensureChannel(name, isPrivate = true) {
     const channelName = sanitizeChannelName(name);
+
     try {
         const res = await slackClient.conversations.create({ name: channelName, is_private: isPrivate });
+        if (!res?.channel?.id) throw new Error('conversations.create returned no channel');
         return res.channel.id;
     } catch (err) {
-        if (err.data?.error === 'name_taken') {
+        const code = err?.data?.error || err?.message;
+        if (code === 'name_taken') {
             const suffix = Math.random().toString(36).slice(2, 6);
             const altName = sanitizeChannelName(`${channelName}-${suffix}`);
-            const res = await slackClient.conversations.create({ name: altName, is_private: isPrivate });
-            return res.channel.id;
+            const res2 = await slackClient.conversations.create({ name: altName, is_private: isPrivate });
+            if (!res2?.channel?.id) throw new Error('conversations.create (alt) returned no channel');
+            return res2.channel.id;
         }
         throw err;
     }
 }
 
 async function inviteAndWelcome(channelId, users, topic, mode) {
-    if (!users?.length) return;
+    if (!channelId || !Array.isArray(users) || users.length === 0) return;
 
     try {
         await slackClient.conversations.invite({ channel: channelId, users: users.join(',') });
     } catch (err) {
-        // Ignora erros como already_in_channel
         const code = err?.data?.error;
+        // ignora alguns erros esperados
         if (!['already_in_channel', 'cant_invite_self'].includes(code)) throw err;
     }
 
     const isPair = users.length === 2 && mode === '1:1';
 
-    // Gera ice breakers via IA
+    // Ice breakers via IA (fallback simples se função não existir/falhar)
     let iceBreakers = [];
     try {
-        iceBreakers = await ai.generateIceBreakers(topic, 3);
+        if (typeof ai.generateIceBreakers === 'function') {
+            iceBreakers = await ai.generateIceBreakers(topic, 3);
+        }
     } catch (err) {
         console.warn('AI icebreaker generation failed:', err.message);
     }
@@ -58,7 +70,7 @@ async function inviteAndWelcome(channelId, users, topic, mode) {
         ? `You’ve been paired 1:1 on *${topic}* 👋`
         : `You’ve been matched on *${topic}* 🎉 (group of ${users.length})`;
 
-    const questions = iceBreakers.length
+    const questions = Array.isArray(iceBreakers) && iceBreakers.length
         ? `\nHere are some ice breakers:\n${iceBreakers.map(q => `• ${q}`).join('\n')}`
         : `\nStarter: *What’s something new you learned about ${topic} recently?*`;
 
@@ -78,34 +90,36 @@ function splitPairs(userIds) {
 async function runMatcher() {
     const responses = await getAllResponses();
 
-    //To test manually, uncomment this and provide sample data:
-    // const responses = [
-    //     { userId: 'U01', topics: ['nintendo', 'fitness'], preference: '1:1' },
-    //     { userId: 'U02', topics: ['ps', 'fitness'], preference: '1:1' },
-    //     { userId: 'U03', topics: ['gaming'], preference: 'group' },
-    //     { userId: 'U04', topics: ['gaming'], preference: 'group' },
-    //     { userId: 'U05', topics: ['dance'], preference: 'group' }, // põe mais para testar sharding
-    // ];
-
+    // Sem gente suficiente → nunca devolve undefined
     if (!responses || responses.length < 2) {
-        console.log('Not enough users to match.');
-        return;
+        const unmatched = Array.isArray(responses) ? responses.map(r => r.userId) : [];
+        console.log(`Not enough users to match. Unmatched: ${unmatched.join(', ')}`);
+        return { created: [], unmatched, notEnough: true };
     }
 
+    // Normalizar
     for (const r of responses) {
-        if (!r.preference) r.preference = 'group';
+        if (!r.preference) r.preference = 'group'; // default se não guardas preferência no responses
         if (!Array.isArray(r.topics)) r.topics = [];
     }
 
+    // Canonicalizar tópicos (fallback: identidade)
     const allTopics = Array.from(new Set(
         responses.flatMap(r => r.topics.map(t => String(t).trim().toLowerCase())).filter(Boolean)
     ));
-    const mapping = await ai.canonicalizeTopics(allTopics);
 
-    for (const t of allTopics) {
-        if (!mapping[t]) mapping[t] = t;
+    let mapping = {};
+    try {
+        if (typeof ai.canonicalizeTopics === 'function') {
+            mapping = await ai.canonicalizeTopics(allTopics);
+        }
+    } catch (e) {
+        console.warn('canonicalizeTopics failed (using identity):', e.message);
     }
+    mapping = mapping && typeof mapping === 'object' ? mapping : {};
+    for (const t of allTopics) if (!mapping[t]) mapping[t] = t;
 
+    // Agrupar por tópico e preferência
     const byTopic = new Map();
     for (const { userId, topics, preference } of responses) {
         const canonTopics = Array.from(new Set(topics.map(
@@ -122,7 +136,7 @@ async function runMatcher() {
     const created = [];
     const matchedUsers = new Set();
 
-    // Criar pares 1:1 primeiro
+    // 1) Criar pares 1:1 primeiro
     for (const [topic, buckets] of byTopic) {
         const oneOnOneIds = Array.from(buckets.pref1v1);
         if (oneOnOneIds.length >= 2) {
@@ -132,7 +146,16 @@ async function runMatcher() {
                     const raw = `micromatch-${topic}-duo-${stamp}`;
                     const channelId = await ensureChannel(raw, true);
                     await inviteAndWelcome(channelId, [a, b], topic, '1:1');
-                    created.push({ topic, type: '1:1', users: [a, b] });
+
+                    // regista sala/participantes (se existir no DB)
+                    if (typeof upsertMatchRoom === 'function') {
+                        await upsertMatchRoom(channelId);
+                    }
+                    if (typeof addMatchParticipants === 'function') {
+                        await addMatchParticipants(channelId, [a, b]);
+                    }
+
+                    created.push({ topic, type: '1:1', channelId, users: [a, b] });
                     matchedUsers.add(a); matchedUsers.add(b);
                     buckets.group.delete(a); buckets.group.delete(b);
                 } catch (err) {
@@ -143,7 +166,7 @@ async function runMatcher() {
         }
     }
 
-    // Criar grupos (garantir que ninguém com match fica sozinho)
+    // 2) Criar grupos (garante que ninguém com match fica sozinho)
     for (const [topic, buckets] of byTopic) {
         const groupUsers = Array.from(buckets.group);
         if (groupUsers.length >= 2) {
@@ -170,7 +193,15 @@ async function runMatcher() {
                     const raw = `micromatch-${topic}-grp-${stamp}${suffix}`;
                     const channelId = await ensureChannel(raw, true);
                     await inviteAndWelcome(channelId, batches[i], topic, 'group');
-                    created.push({ topic, type: 'group', users: batches[i] });
+
+                    if (typeof upsertMatchRoom === 'function') {
+                        await upsertMatchRoom(channelId);
+                    }
+                    if (typeof addMatchParticipants === 'function') {
+                        await addMatchParticipants(channelId, batches[i]);
+                    }
+
+                    created.push({ topic, type: 'group', channelId, users: batches[i] });
                     for (const u of batches[i]) matchedUsers.add(u);
                 }
             } catch (err) {
@@ -179,21 +210,18 @@ async function runMatcher() {
         }
     }
 
-    // Quem não entrou em nenhum match
+    // 3) Quem não entrou em nenhum match
     const allUserIds = responses.map(r => r.userId);
     const unmatched = allUserIds.filter(u => !matchedUsers.has(u));
 
     if (unmatched.length) {
-        console.log(`Users sem match: ${unmatched.join(', ')}`);
-        // ⚠️ Aqui apenas sinalizamos — o envio de DM com botões deve ser feito no server.js
-        // Sugestão: enviar Block Kit com lista de tópicos que têm grupo disponível (created.filter(c => c.type==='group')).
+        console.log(`Users without match: ${unmatched.join(', ')}`);
     }
 
     if (!created.length) console.log('No channels created (insufficient overlaps).');
     else console.log(`Created ${created.length} channel(s).`);
 
-
-    return { created, unmatched };
+    return { created, unmatched, notEnough: false };
 }
 
 if (require.main === module) {

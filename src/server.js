@@ -839,7 +839,8 @@ app.get('/debug/match', async (req, res) => {
         }
 
         // Aqui corre sempre (se foi manual, ou se for sexta com token)
-        const { created, unmatched } = await runMatcher();
+        const result = await runMatcher();
+        const { created = [], unmatched = [], notEnough = false } = result || {};
 
         const groupRooms = created
             .filter(c => c.type === 'group')
