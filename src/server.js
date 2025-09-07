@@ -814,7 +814,7 @@ app.get('/debug/responses', async (req, res) => {
 app.get('/debug/clear', async (req, res) => {
     try {
         await clearResponses();
-        res.send('Responses cleared');
+        res.send('Responses cleared ');
         await clearUsers();
         res.send('Users cleared');
     } catch (err) {
