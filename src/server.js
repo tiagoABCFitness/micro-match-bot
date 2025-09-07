@@ -6,7 +6,7 @@ const { WebClient } = require('@slack/web-api');
 const app = express();
 const { runMatcher } = require('./matcher');
 
-const { countryFunFact, analyzeInterests, culturalTopicSuggestions } = require('./ai.js');
+const { countryFunFact, analyzeInterests, culturalTopicSuggestions, detectUserIntent } = require('./ai.js');
 const {
     saveResponse,
     getAllResponses,
@@ -334,47 +334,63 @@ app.post('/slack/events', async (req, res) => {
                 return res.status(200).send();
             }
 
-            // 6) Active user — propose updates from free text (no more comma parsing)
+            // 6) Active user — friendly small talk OR propose updates from free text
             if (userText) {
-                const analysis = await analyzeInterests(userText).catch(() => ({ reply: '', interests: [] }));
-                const interests = Array.isArray(analysis.interests) ? analysis.interests : [];
+                // 1) Primeiro, tenta perceber a intenção (mudar interesses vs. small talk)
+                const { country } = user || {};
+                const intent = await detectUserIntent(userText, country).catch(() => ({ intent: 'other', reply: '' }));
 
-                if (interests.length === 0) {
+                if (intent.intent === 'change_interests') {
+                    // 2) Segue o fluxo atual: analisar texto e propor bullets
+                    const analysis = await analyzeInterests(userText).catch(() => ({ reply: '', interests: [] }));
+                    const interests = Array.isArray(analysis.interests) ? analysis.interests : [];
+
+                    if (interests.length === 0) {
+                        await slackClient.chat.postMessage({
+                            channel: userId,
+                            text: "I didn’t pick up enough interests to update your list. Could you add a bit more detail?",
+                            blocks: [
+                                { type: 'section', text: { type: 'mrkdwn', text: "I didn’t pick up enough interests to update your list. Could you add a bit more detail?" } },
+                                suggestTopicsButton()
+                            ]
+                        });
+                        return res.status(200).send();
+                    }
+
+                    pendingInterests.set(userId, interests);
+                    await setUserStatus(userId, 'awaiting_interests_freeform');
+
+                    const intro = analysis.reply || 'Got it. Here is what I caught:';
+                    const list = bullets(interests);
+
                     await slackClient.chat.postMessage({
                         channel: userId,
-                        text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match.",
+                        text: `${intro}\n\nProposed interests:\n${list}`,
                         blocks: [
-                            { type: 'section', text: { type: 'mrkdwn', text: "Hey again — I've got your interests for this week. If you'd like to change them, tell me a bit about what you'd like to discuss or learn; otherwise you're all set and I'll work on finding you a match." } },
-                            suggestTopicsButton()
+                            { type: 'section', text: { type: 'mrkdwn', text: intro } },
+                            { type: 'section', text: { type: 'mrkdwn', text: `*Proposed interests:*\n${list}` } },
+                            {
+                                type: 'actions',
+                                elements: [
+                                    { type: 'button', text: { type: 'plain_text', text: 'Confirm' }, style: 'primary', action_id: 'confirm_interests' },
+                                    { type: 'button', text: { type: 'plain_text', text: 'Give more details' }, action_id: 'refine_interests' }
+                                ]
+                            }
                         ]
                     });
+
                     return res.status(200).send();
                 }
 
-                pendingInterests.set(userId, interests);
-                await setUserStatus(userId, 'awaiting_interests_freeform');
-
-                const intro = analysis.reply || 'Got it. Here is what I caught:';
-                const list = bullets(interests);
-
+                // 3) Se não for para mudar (small talk/other), responde de forma humana e calorosa
+                const friendly = intent.reply || "Glad to hear from you! If you ever want to update your interests, just tell me and I’ll suggest a new list.";
                 await slackClient.chat.postMessage({
                     channel: userId,
-                    text: `${intro}\n\nProposed interests:\n${list}`,
-                    blocks: [
-                        { type: 'section', text: { type: 'mrkdwn', text: intro } },
-                        { type: 'section', text: { type: 'mrkdwn', text: `*Proposed interests:*\n${list}` } },
-                        {
-                            type: 'actions',
-                            elements: [
-                                { type: 'button', text: { type: 'plain_text', text: 'Confirm' }, style: 'primary', action_id: 'confirm_interests' },
-                                { type: 'button', text: { type: 'plain_text', text: 'Give more details' }, action_id: 'refine_interests' }
-                            ]
-                        }
-                    ]
+                    text: friendly
                 });
-
                 return res.status(200).send();
             }
+
 
             // If we get here, there was no text to process
             await slackClient.chat.postMessage({

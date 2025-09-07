@@ -175,4 +175,46 @@ async function generateIceBreakers(topic, count = 3) {
     return questions.slice(0, count);
 }
 
-module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions, canonicalizeTopics, generateIceBreakers };
+/**
+ * Decide se o utilizador quer atualizar interesses (change_interests)
+ * ou se é apenas small talk. Produz também uma resposta curta e calorosa.
+ * Retorna: { intent: 'change_interests'|'smalltalk'|'other', reply: string }
+ */
+async function detectUserIntent(userText, countryRaw) {
+    const client = await getClient();
+    const country = (countryRaw || '').toString().trim();
+
+    const system = [
+        'You are a friendly Slack bot. Classify the user message and craft a warm one-line reply in English.',
+        'Output STRICT JSON: {"intent":"change_interests"|"smalltalk"|"other","reply":string}',
+        'Rules:',
+        '- "change_interests": user asks to change/update/add/remove interests/topics OR lists new topics.',
+        '- "smalltalk": thanks, greetings, appreciation, unrelated chitchat.',
+        '- "other": anything else.',
+        '- "reply": one of few sentence, warm, natural, <= 100 words, can use emojis.',
+        country
+            ? `- If helpful, personalize gently with the country "${country}" in a positive, non-stereotyped way (e.g., "Hope things are going well in ${country}.").`
+            : '- Avoid stereotypes. No assumptions beyond what is said.'
+    ].join('\n');
+
+    const resp = await client.chat.completions.create({
+        model: process.env.AZURE_OPENAI_DEPLOYMENT,
+        temperature: 0.5,
+        max_tokens: 150,
+        messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: userText },
+            { role: 'user', content: 'Return JSON only.' }
+        ]
+    });
+
+    const raw = resp.choices?.[0]?.message?.content || '';
+    const json = safeParseJSON(raw) || {};
+    const intent = ['change_interests','smalltalk','other'].includes(json.intent) ? json.intent : 'other';
+    const reply = (json.reply || '').toString().trim();
+
+    return { intent, reply };
+}
+
+
+module.exports = { countryFunFact, analyzeInterests, culturalTopicSuggestions, canonicalizeTopics, generateIceBreakers, detectUserIntent };
