@@ -132,7 +132,7 @@ async function handleSlackActions(req, res) {
 
             await slackClient.chat.postMessage({
                 channel: userId,
-                text: `👍 No problem, ${name}! If you change your mind, just send me a message anytime.`
+                text: `👍 No problem, ${name}! If you change your mind, just send me a message.`
             });
         }
 
