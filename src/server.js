@@ -382,6 +382,18 @@ app.post('/slack/events', async (req, res) => {
                     return res.status(200).send();
                 }
 
+                if (intent.intent === 'bot_questions') {
+                    const friendly = "Glad you ask! You can chack everything on the About tab right under my name.";
+                    await slackClient.chat.postMessage({
+                        channel: userId,
+                        text: friendly
+                    });
+                    return res.status(200).send();
+
+
+                    return res.status(200).send();
+                }
+
                 // 3) Se não for para mudar (small talk/other), responde de forma humana e calorosa
                 const friendly = intent.reply || "Glad to hear from you! If you ever want to update your interests, just tell me and I’ll suggest a new list.";
                 await slackClient.chat.postMessage({

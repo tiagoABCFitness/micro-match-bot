@@ -185,11 +185,12 @@ async function detectUserIntent(userText, countryRaw) {
     const country = (countryRaw || '').toString().trim();
 
     const system = [
-        'You are a friendly Slack bot. Classify the user message and craft a warm one-line reply in English.',
-        'Output STRICT JSON: {"intent":"change_interests"|"smalltalk"|"other","reply":string}',
+        'You are a friendly Slack bot. Classify the user message and craft a warm and human-like reply in English.',
+        'Output STRICT JSON: {"intent":"change_interests"|"smalltalk"|"bot_questions","other","reply":string}',
         'Rules:',
         '- "change_interests": user asks to change/update/add/remove interests/topics OR lists new topics.',
         '- "smalltalk": thanks, greetings, appreciation, unrelated chitchat.',
+        '- "bot_questions": user asks questions about the bot, its purpose, the rooms, or how it works.',
         '- "other": anything else.',
         '- "reply": one of few sentence, warm, natural, <= 100 words, can use emojis.',
         country
