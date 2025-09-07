@@ -189,8 +189,8 @@ async function detectUserIntent(userText, countryRaw) {
         'Output STRICT JSON: {"intent":"change_interests"|"smalltalk"|"bot_questions","other","reply":string}',
         'Rules:',
         '- "change_interests": user asks to change/update/add/remove interests/topics OR lists new topics.',
-        '- "smalltalk": thanks, greetings, appreciation, unrelated chitchat.',
-        '- "bot_questions": user asks questions about the bot, its purpose, the rooms, or how it works.',
+        '- "smalltalk": thanks, greetings, appreciation, non bot questions.',
+        '- "bot_questions": user asks questions about the bot, its purpose, the rooms, help, or how it works.',
         '- "other": anything else.',
         '- "reply": one of few sentence, warm, natural, <= 100 words, can use emojis.',
         country
