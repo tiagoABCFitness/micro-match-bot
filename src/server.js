@@ -58,6 +58,14 @@ function bullets(list) {
     return list.map(i => `• ${i}`).join('\n');
 }
 
+function isoWeekStart(date = new Date()) {
+    // returns "YYYY-MM-DD" for the Monday of the ISO week containing `date`
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const day = d.getUTCDay() || 7; // Sun=0 -> 7, Mon=1 ... Sun=7
+    if (day !== 1) d.setUTCDate(d.getUTCDate() - (day - 1)); // go back to Monday
+    return d.toISOString().slice(0, 10);
+}
+
 function prevIsoWeekStart(from = new Date()) {
     const d = new Date(from);
     d.setUTCDate(d.getUTCDate() - 7);
@@ -425,8 +433,6 @@ app.post('/slack/events', async (req, res) => {
                         channel: userId,
                         text: friendly
                     });
-                    return res.status(200).send();
-
 
                     return res.status(200).send();
                 }
