@@ -28,7 +28,9 @@ const {
     upsertCheckinConnected,
     upsertCheckinParticipate,
     getOptedInUsersForWeek,
-    getUnmatchedUsersForWeek
+    getUnmatchedUsersForWeek,
+    addMatchParticipants,
+    getParticipantsForChannels
 } = require('./db');
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
@@ -918,6 +920,7 @@ app.get('/debug/weekly-checkin', async (req, res) => {
                 // Nota: se não implementaste esta função, typeof devolve 'undefined' e este bloco é ignorado
                 if (typeof getParticipantsForChannels === 'function') {
                     participants = await getParticipantsForChannels([channel]);
+                    console.log('participants snapshot for', channel, participants);
                 }
             } catch (e) {
                 console.warn('getParticipantsForChannels failed:', e.message);

@@ -60,6 +60,14 @@ db.serialize(() => {
       PRIMARY KEY (user_id, week_bucket)
     )
   `);
+
+    db.run(`
+  CREATE TABLE IF NOT EXISTS match_participants (
+    channel_id TEXT,
+    user_id    TEXT,
+    PRIMARY KEY (channel_id, user_id)
+  )
+`);
 });
 
 // -------- responses --------
@@ -369,6 +377,35 @@ function getUnmatchedUsersForWeek(weekBucket) {
     });
 }
 
+// Guarda participantes de um canal (INSERT OR IGNORE)
+function addMatchParticipants(channelId, userIds) {
+    if (!channelId || !Array.isArray(userIds) || userIds.length === 0) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        db.serialize(() => {
+            const stmt = db.prepare(
+                `INSERT OR IGNORE INTO match_participants (channel_id, user_id) VALUES (?, ?)`
+            );
+            for (const uid of userIds) {
+                if (uid) stmt.run([channelId, uid]);
+            }
+            stmt.finalize(err => err ? reject(err) : resolve());
+        });
+    });
+}
+
+// Devolve os participantes para 1+ canais
+function getParticipantsForChannels(channelIds) {
+    if (!Array.isArray(channelIds) || channelIds.length === 0) return Promise.resolve([]);
+    const placeholders = channelIds.map(() => '?').join(',');
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT DISTINCT user_id FROM match_participants WHERE channel_id IN (${placeholders})`,
+            channelIds,
+            (err, rows) => (err ? reject(err) : resolve((rows || []).map(r => r.user_id)))
+        );
+    });
+}
+
 module.exports = {
     // responses
     saveResponse,
@@ -396,5 +433,8 @@ module.exports = {
     getOptedInUsersForWeek,
     // unmatched
     addUnmatchedUsersForWeek,
-    getUnmatchedUsersForWeek
+    getUnmatchedUsersForWeek,
+    // match participants
+    addMatchParticipants,
+    getParticipantsForChannels
 };
