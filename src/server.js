@@ -27,7 +27,8 @@ const {
     getActiveRooms,
     upsertCheckinConnected,
     upsertCheckinParticipate,
-    getOptedInUsersForWeek
+    getOptedInUsersForWeek,
+    getUnmatchedUsersForWeek
 } = require('./db');
 
 const { sendConsentMessage, handleSlackActions, getUserName } = require('./consent');
@@ -55,6 +56,18 @@ function extractChannelId(body) {
 
 function bullets(list) {
     return list.map(i => `• ${i}`).join('\n');
+}
+
+function isoWeekStart(date = new Date()) {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const day = d.getUTCDay() || 7; // segunda=1
+    if (day !== 1) d.setUTCDate(d.getUTCDate() - (day - 1));
+    return d.toISOString().slice(0, 10);
+}
+function prevIsoWeekStart(from = new Date()) {
+    const d = new Date(from);
+    d.setUTCDate(d.getUTCDate() - 7);
+    return isoWeekStart(d);
 }
 
 /** Replace any actions block with a context note (hides buttons after click) */
@@ -870,6 +883,9 @@ app.get('/debug/weekly-checkin', async (req, res) => {
         const token = req.query.token;
         const today = new Date().getUTCDay(); // 0=Domingo ... 5=Sexta
 
+        const thisWeekBucket = isoWeekStart(new Date());
+        const lastWeekBucket = prevIsoWeekStart(new Date());
+
         // Se tem token (vem do Scheduler) → só corre às tercas
         if (token) {
             if (today !== 2) {
@@ -952,28 +968,33 @@ app.get('/debug/weekly-checkin', async (req, res) => {
             }
         }
 
-        // 4) also ping users who opted-in LAST WEEK but never got a room
+        // (4) opted-in da semana passada que não estiveram em sala
         try {
-            const optedIn = await getOptedInUsersForWeek(lastWeek);
+            const optedIn = await getOptedInUsersForWeek(lastWeekBucket);
             for (const uid of optedIn || []) {
-                if (!uid || dmSet.has(uid)) continue; // already DM'ed above
-                try {
-                    const u = await getUser(uid).catch(() => null);
-                    await askWeeklyCheckin(uid, u?.name);
-                    dmSet.add(uid);
-                    dms++;
-                } catch (e) {
-                    console.warn('opted-in DM failed for', uid, e.message);
-                }
+                if (!uid || dmSet.has(uid)) continue;
+                const u = await getUser(uid).catch(() => null);
+                await askWeeklyCheckin(uid, u?.name);
+                dmSet.add(uid); dms++;
             }
-        } catch (e) {
-            console.warn('fetch opted-in users failed:', e.message);
-        }
+        } catch (e) { console.warn('opted-in fetch failed:', e.message); }
+
+        // (5) UNMATCHED da semana passada (sem sala) — garante o teu caso de 1 utilizador
+        try {
+            const unmatchedPrev = await getUnmatchedUsersForWeek(lastWeekBucket);
+            for (const uid of unmatchedPrev || []) {
+                if (!uid || dmSet.has(uid)) continue; // evita duplicar
+                const u = await getUser(uid).catch(() => null);
+                await askWeeklyCheckin(uid, u?.name);
+                dmSet.add(uid);
+                dms++;
+            }
+        }catch (e) { console.warn('unmatchedPrev fetch failed:', e.message); }
 
         return res.json({
             ok: true,
-            week,
-            lastWeek,
+            thisWeekBucket,
+            lastWeekBucket,
             channelsProcessed: channelIds.length,
             archived,
             checkinDMs: dms,

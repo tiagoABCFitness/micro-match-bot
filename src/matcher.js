@@ -2,7 +2,8 @@
 require('dotenv').config();
 const slackClient = require('./slackClient');
 const ai = require('./ai');
-const { getAllResponses } = require('./db'); // sempre existe
+const { getAllResponses, addUnmatchedUsersForWeek,
+    getUnmatchedUsersForWeek} = require('./db'); // sempre existe
 
 // opcional: só usamos se existirem no db.js
 let upsertMatchRoom, addMatchParticipants;
@@ -17,6 +18,13 @@ function sanitizeChannelName(name) {
         .replace(/-+/g, '-')
         .replace(/^-+|-+$/g, '')
         .substring(0, 80);
+}
+
+function isoWeekStart(date = new Date()) {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const day = d.getUTCDay() || 7; // 1..7, segunda=1
+    if (day !== 1) d.setUTCDate(d.getUTCDate() - (day - 1));
+    return d.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 function todayStamp() {
@@ -220,6 +228,12 @@ async function runMatcher() {
 
     if (!created.length) console.log('No channels created (insufficient overlaps).');
     else console.log(`Created ${created.length} channel(s).`);
+
+    const weekBucket = isoWeekStart(new Date());
+    if (typeof addUnmatchedUsersForWeek === 'function' && unmatched.length) {
+        try { await addUnmatchedUsersForWeek(weekBucket, unmatched); }
+        catch (e) { console.warn('addUnmatchedUsersForWeek failed:', e.message); }
+    }
 
     return { created, unmatched, notEnough: false };
 }

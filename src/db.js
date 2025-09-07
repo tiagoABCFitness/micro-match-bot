@@ -31,23 +31,33 @@ db.serialize(() => {
 
     // rooms used for matches (to later archive)
     db.run(`
-    CREATE TABLE IF NOT EXISTS match_rooms (
-      channel_id TEXT PRIMARY KEY,
-      created_at TEXT,
-      archived   INTEGER DEFAULT 0
-    )
-  `);
+        CREATE TABLE IF NOT EXISTS match_rooms (
+                                                   channel_id TEXT PRIMARY KEY,
+                                                   created_at TEXT,
+                                                   archived   INTEGER DEFAULT 0
+        )
+    `);
 
     // weekly check-ins
     db.run(`
-    CREATE TABLE IF NOT EXISTS checkins (
-      user_id          TEXT,
-      week             TEXT,             -- e.g., 2025-09-02
-      connected        INTEGER,          -- 0/1
-      will_participate INTEGER,          -- 0/1
-      created_at       TEXT,
-      updated_at       TEXT,
-      PRIMARY KEY (user_id, week)
+        CREATE TABLE IF NOT EXISTS checkins (
+                                                user_id          TEXT,
+                                                week             TEXT,             -- e.g., 2025-09-02 (or your chosen key)
+                                                connected        INTEGER,          -- 0/1
+                                                will_participate INTEGER,          -- 0/1
+                                                created_at       TEXT,
+                                                updated_at       TEXT,
+                                                PRIMARY KEY (user_id, week)
+            )
+    `);
+
+    // unmatched participants per ISO-week bucket (e.g., Monday date "YYYY-MM-DD")
+    db.run(`
+    CREATE TABLE IF NOT EXISTS unmatched_participants (
+      user_id     TEXT,
+      week_bucket TEXT,
+      created_at  TEXT,
+      PRIMARY KEY (user_id, week_bucket)
     )
   `);
 });
@@ -263,8 +273,8 @@ function upsertMatchRoom(channelId) {
         const ts = new Date().toISOString();
         db.run(
             `INSERT INTO match_rooms (channel_id, created_at, archived)
-       VALUES (?, ?, 0)
-       ON CONFLICT(channel_id)
+             VALUES (?, ?, 0)
+                 ON CONFLICT(channel_id)
        DO UPDATE SET archived = 0`,
             [channelId, ts],
             function (err) { if (err) reject(err); else resolve(); }
@@ -298,8 +308,8 @@ function upsertCheckinConnected(userId, week, connected) {
         const ts = new Date().toISOString();
         db.run(
             `INSERT INTO checkins (user_id, week, connected, will_participate, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(user_id, week)
+             VALUES (?, ?, ?, NULL, ?, ?)
+                 ON CONFLICT(user_id, week)
        DO UPDATE SET connected = excluded.connected, updated_at = excluded.updated_at`,
             [userId, week, connected ? 1 : 0, ts, ts],
             function (err) { if (err) reject(err); else resolve(); }
@@ -312,8 +322,8 @@ function upsertCheckinParticipate(userId, week, willParticipate) {
         const ts = new Date().toISOString();
         db.run(
             `INSERT INTO checkins (user_id, week, connected, will_participate, created_at, updated_at)
-       VALUES (?, ?, NULL, ?, ?, ?)
-       ON CONFLICT(user_id, week)
+             VALUES (?, ?, NULL, ?, ?, ?)
+                 ON CONFLICT(user_id, week)
        DO UPDATE SET will_participate = excluded.will_participate, updated_at = excluded.updated_at`,
             [userId, week, willParticipate ? 1 : 0, ts, ts],
             function (err) { if (err) reject(err); else resolve(); }
@@ -321,7 +331,6 @@ function upsertCheckinParticipate(userId, week, willParticipate) {
     });
 }
 
-// Quem disse que queria participar numa dada semana
 function getOptedInUsersForWeek(week) {
     return new Promise((resolve, reject) => {
         db.all(
@@ -332,7 +341,33 @@ function getOptedInUsersForWeek(week) {
     });
 }
 
-module.exports.getOptedInUsersForWeek = getOptedInUsersForWeek;
+// -------- unmatched per week (ISO week bucket) --------
+function addUnmatchedUsersForWeek(weekBucket, userIds) {
+    if (!Array.isArray(userIds) || userIds.length === 0) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const ts = new Date().toISOString();
+        db.serialize(() => {
+            const stmt = db.prepare(
+                `INSERT OR IGNORE INTO unmatched_participants (user_id, week_bucket, created_at)
+         VALUES (?, ?, ?)`
+            );
+            for (const uid of userIds) {
+                if (uid) stmt.run([uid, weekBucket, ts]);
+            }
+            stmt.finalize(err => err ? reject(err) : resolve());
+        });
+    });
+}
+
+function getUnmatchedUsersForWeek(weekBucket) {
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT user_id FROM unmatched_participants WHERE week_bucket = ?`,
+            [weekBucket],
+            (err, rows) => (err ? reject(err) : resolve((rows || []).map(r => r.user_id)))
+        );
+    });
+}
 
 module.exports = {
     // responses
@@ -358,5 +393,8 @@ module.exports = {
     // check-ins
     upsertCheckinConnected,
     upsertCheckinParticipate,
-    getOptedInUsersForWeek
+    getOptedInUsersForWeek,
+    // unmatched
+    addUnmatchedUsersForWeek,
+    getUnmatchedUsersForWeek
 };
