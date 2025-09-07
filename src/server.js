@@ -858,7 +858,7 @@ app.get('/debug/match', async (req, res) => {
 });
 
 // Arquiva salas + dispara DMs de check-in
-app.post('/debug/weekly-checkin', async (req, res) => {
+app.get('/debug/weekly-checkin', async (req, res) => {
     try {
         const token = req.query.token;
         const today = new Date().getUTCDay(); // 0=Domingo ... 5=Sexta
