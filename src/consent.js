@@ -26,7 +26,7 @@ async function sendConsentMessage(userId, { revisit = false } = {}) {
         ? `👋 Welcome back, *${userName}*`
         : `👋 Hi *${userName}*, I’m Micro-Match!`;
 
-    const body = `\nTo get started, I need your consent to record your answers for matchmaking only. Data is stored securely and never shared. Is that okay? ?`;
+    const body = `\nTo get started, I need your consent to record your answers for matchmaking only. Data is stored securely and never shared. Is that okay?`;
 
     const message = {
         channel: userId,
