@@ -120,6 +120,44 @@ function clearUsers() {
     });
 }
 
+function clearRooms() {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM match_rooms`, [], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+function clearCheckins() {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM checkins`, [], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+function clearUnmatched() {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM unmatched_participants`, [], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+function clearMatched() {
+    return new Promise((resolve, reject) => {
+        db.run(`DELETE FROM match_participants`, [], function (err) {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
+
+
 // -------- users --------
 function saveUser(userId, name, consent, status) {
     return new Promise((resolve, reject) => {
@@ -412,6 +450,10 @@ module.exports = {
     getAllResponses,
     clearResponses,
     clearUsers,
+    clearRooms,
+    clearCheckins,
+    clearUnmatched,
+    clearMatched,
     // users
     saveUser,
     getUser,

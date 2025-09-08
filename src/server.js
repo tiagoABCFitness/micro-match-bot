@@ -12,6 +12,10 @@ const {
     getAllResponses,
     clearResponses,
     clearUsers,
+    clearRooms,
+    clearCheckins,
+    clearMatched,
+    clearUnmatched,
     getUser,
     saveUser,
     setUserStatus,
@@ -825,6 +829,14 @@ app.get('/debug/clear', async (req, res) => {
         res.send('Responses cleared ');
         await clearUsers();
         res.send('Users cleared');
+        await clearRooms();
+        res.send('Rooms cleared');
+        await clearCheckins();
+        res.send('Checkins cleared');
+        await clearUnmatched();
+        res.send('Unmatched cleared');
+        await clearUnmatched();
+        res.send('Unmatched cleared');
     } catch (err) {
         res.status(500).send(err.message);
     }
@@ -846,7 +858,7 @@ app.get('/debug/match', async (req, res) => {
 
         // Se tem token (vem do Scheduler) → só corre às quintas
         if (token) {
-            if (today !== 4) {
+            if (today !== 100) { //Change to 4 after testing
                 return res.json({ skipped: true, reason: 'Not thursday' });
             }
         }
@@ -882,7 +894,7 @@ app.get('/debug/weekly-checkin', async (req, res) => {
         const lastWeekBucket = prevIsoWeekStart(new Date());
 
         // Se tem token (scheduler) → só corre à terça (UTC)
-        if (token && today !== 2) {
+        if (token && today !== 100) { //change to 2 after testing
             return res.json({ skipped: true, reason: 'Not Tuesday', today });
         }
 
