@@ -640,6 +640,22 @@ app.post('/slack/actions', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        if (actionId === 'join_group_rejected') {
+            try {
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: `No problem! Hope to see you next week for a new round.`
+                });
+            } catch (err) {
+                console.error("Error adding user to group:", err);
+                await slackClient.chat.postMessage({
+                    channel: userId,
+                    text: "⚠️ Sorry, something went wrong. Please try again later."
+                });
+            }
+            return res.sendStatus(200);
+        }
+
         if (actionId === 'confirm_exit_yes') {
             // esconde os botões na mensagem original
             await slackClient.chat.update({

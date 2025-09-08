@@ -82,7 +82,7 @@ async function inviteAndWelcome(channelId, users, topic, mode) {
         ? `\nHere are some ice breakers:\n${iceBreakers.map(q => `• ${q}`).join('\n')}`
         : `\nStarter: *What’s something new you learned about ${topic} recently?*`;
 
-    const text = `${base}${questions}`;
+    const text = `${base}${questions}\n\nReminder: this room gets archived next Monday. Let’s make this micro match count!`;
 
     await slackClient.chat.postMessage({ channel: channelId, text });
 }
